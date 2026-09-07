@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.database.sqlite import init_db
 from app.database.qdrant_client import init_qdrant
-from app.api import documents, health
+from app.api import documents, facts, health
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,3 +44,4 @@ app.add_middleware(
 
 app.include_router(health.router,    prefix="/api", tags=["health"])
 app.include_router(documents.router, prefix="/api", tags=["documents"])
+app.include_router(facts.router,     prefix="/api", tags=["facts"])

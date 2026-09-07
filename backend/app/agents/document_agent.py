@@ -10,6 +10,7 @@ Each node updates the job record in SQLite so the SSE stream
 can push real-time progress to the frontend.
 """
 
+import asyncio
 import json
 import logging
 import uuid
@@ -137,16 +138,30 @@ async def persist_chunks_node(state: DocumentState) -> DocumentState:
             )
             await db.commit()
 
-        # Update document status: chunked → ready for fact extraction (Phase 2)
+        # Update document status and hand off to Phase 2
         await _update_doc_status(state["doc_id"], "chunked")
         await _update_job(
             state["job_id"],
             status="done",
             stage="done",
             progress=100,
-            message=f"Phase 1 complete — {len(chunks)} chunks stored. Fact extraction queued.",
+            message=f"Phase 1 complete — {len(chunks)} chunks stored. Launching fact extraction…",
         )
-        logger.info("[%s] Phase 1 done: %d chunks persisted", state["doc_id"], len(chunks))
+        logger.info("[%s] Phase 1 done: %d chunks persisted — firing Phase 2", state["doc_id"], len(chunks))
+
+        # Fire Phase 2 as a background asyncio task (non-blocking)
+        from app.agents.extraction_agent import run_extraction_pipeline
+        extraction_job_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        async with aiosqlite.connect(settings.db_path) as db:
+            await db.execute(
+                """INSERT INTO jobs (id, doc_id, status, stage, progress, message, created_at, updated_at)
+                   VALUES (?, ?, 'queued', 'pending', 0, 'Fact extraction queued', ?, ?)""",
+                (extraction_job_id, state["doc_id"], now, now),
+            )
+            await db.commit()
+        asyncio.create_task(run_extraction_pipeline(state["doc_id"], extraction_job_id))
+
         return {**state, "stage": "done", "progress": 100}
     except Exception as exc:
         logger.exception("Persist error for doc %s", state["doc_id"])

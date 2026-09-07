@@ -24,9 +24,12 @@ services:
     environment:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
+    environment:
+      - FASTEMBED_CACHE_PATH=/app/models_cache
     volumes:
       - uploads_data:/app/uploads
       - sqlite_data:/app/data
+      - models_cache:/app/models_cache
     depends_on:
       qdrant:
         condition: service_healthy
@@ -56,3 +59,4 @@ volumes:
   qdrant_data:
   uploads_data:
   sqlite_data:
+  models_cache:
