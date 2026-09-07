@@ -71,6 +71,39 @@ export const getChunks = async (docId: string, level?: string): Promise<Chunk[]>
   return data
 }
 
+export interface QuerySourceFact {
+  id: string
+  doc_id: string
+  statement: string
+  subject: string | null
+  predicate: string | null
+  value_raw: string | null
+  unit_raw: string | null
+  time_period_raw: string | null
+  scope: string | null
+  fact_type: string
+  confidence: number
+  exact_quote: string | null
+  evidence_verified: boolean
+}
+
+export interface QueryResult {
+  answer: string
+  source_facts: QuerySourceFact[]
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW'
+  retrieval_meta: { hits: number; used: number; method: string }
+  caveat: string | null
+}
+
+export const queryKnowledgeLayer = async (
+  question: string,
+  doc_id?: string,
+  limit = 12,
+): Promise<QueryResult> => {
+  const { data } = await api.post('/query', { question, doc_id, limit })
+  return data
+}
+
 export const subscribeToEvents = (
   docId: string,
   onEvent: (job: Job) => void,

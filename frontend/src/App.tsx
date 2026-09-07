@@ -5,16 +5,17 @@ import { UploadZone } from './components/UploadZone'
 import { DocumentList } from './components/DocumentList'
 import { FactsPage } from './pages/FactsPage'
 import { RelationshipsPage } from './pages/RelationshipsPage'
+import { QueryPage } from './pages/QueryPage'
 
 interface DocEntry { doc: Document; job?: Job }
-type Tab = 'documents' | 'facts' | 'relationships'
+type Tab = 'documents' | 'facts' | 'relationships' | 'query'
 
 const PHASES = [
   { n: 1, label: 'Document Intelligence', done: true },
   { n: 2, label: 'Fact Extraction',       done: true },
   { n: 3, label: 'ColBERT Indexing',      done: true },
-  { n: 4, label: 'Cross-Doc Comparison',  done: false, active: true },
-  { n: 5, label: 'Query Interface',       done: false },
+  { n: 4, label: 'Cross-Doc Comparison',  done: true },
+  { n: 5, label: 'Query Interface',       done: false, active: true },
 ]
 
 export default function App() {
@@ -61,6 +62,7 @@ export default function App() {
     { id: 'documents',     label: 'Documents' },
     { id: 'facts',         label: 'Facts' },
     { id: 'relationships', label: 'Relationships' },
+    { id: 'query',         label: 'Query' },
   ]
 
   return (
@@ -181,8 +183,10 @@ export default function App() {
           </div>
         ) : tab === 'facts' ? (
           <FactsPage documents={docs} />
-        ) : (
+        ) : tab === 'relationships' ? (
           <RelationshipsPage documents={docs} />
+        ) : (
+          <QueryPage documents={docs} />
         )}
       </main>
     </div>

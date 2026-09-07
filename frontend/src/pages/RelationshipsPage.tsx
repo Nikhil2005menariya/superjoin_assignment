@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { RotateCcw } from 'lucide-react'
 import clsx from 'clsx'
 import { api, Document } from '../api/client'
@@ -75,6 +75,113 @@ function FactSnippet({ fact, docName }: { fact: RelFact | null; docName: string 
   )
 }
 
+// ─── Network graph ────────────────────────────────────────────────────────────
+
+const EDGE_COLOR = {
+  CORROBORATES: '#003c33',
+  CONTRADICTS:  '#e53935',
+  RECONCILES:   '#6b7280',
+} as const
+
+interface GraphNode { id: string; label: string; x: number; y: number }
+interface GraphEdge { source: string; target: string; type: string }
+
+function NetworkGraph({ rels, docMap }: { rels: Relationship[]; docMap: Record<string, string> }) {
+  const W = 560, H = 260, R = 22
+
+  const { nodes, edges } = useMemo(() => {
+    const docIds = Array.from(new Set(
+      rels.flatMap(r => [r.fact_a?.doc_id, r.fact_b?.doc_id].filter(Boolean) as string[])
+    ))
+    const n = docIds.length
+    const nodes: GraphNode[] = docIds.map((id, i) => {
+      const angle = (2 * Math.PI * i) / n - Math.PI / 2
+      const cx = W / 2 + (n === 1 ? 0 : (W / 2 - 50)) * Math.cos(angle)
+      const cy = H / 2 + (n === 1 ? 0 : (H / 2 - 40)) * Math.sin(angle)
+      return { id, label: (docMap[id] ?? id).replace(/\.[^.]+$/, '').slice(0, 18), x: cx, y: cy }
+    })
+    const seen = new Set<string>()
+    const edges: GraphEdge[] = []
+    for (const r of rels) {
+      const a = r.fact_a?.doc_id, b = r.fact_b?.doc_id
+      if (!a || !b || a === b) continue
+      const key = [a, b].sort().join('|') + r.type
+      if (seen.has(key)) continue
+      seen.add(key)
+      edges.push({ source: a, target: b, type: r.type })
+    }
+    return { nodes, edges }
+  }, [rels, docMap])
+
+  if (nodes.length < 2) return null
+
+  const nMap = Object.fromEntries(nodes.map(n => [n.id, n]))
+
+  return (
+    <div className="rounded-sm border border-hairline bg-canvas">
+      <div className="flex items-center gap-2 border-b border-hairline px-4 py-2.5">
+        <svg className="h-3.5 w-3.5 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="19" r="2"/>
+          <line x1="5" y1="7" x2="12" y2="17"/><line x1="19" y1="7" x2="12" y2="17"/>
+          <line x1="7" y1="5" x2="17" y2="5"/>
+        </svg>
+        <p className="font-mono text-[10px] uppercase tracking-widest text-muted">Document network</p>
+        <div className="ml-auto flex items-center gap-3">
+          {Object.entries(EDGE_COLOR).map(([t, c]) => (
+            <span key={t} className="flex items-center gap-1 text-[10px] text-muted">
+              <span className="inline-block h-px w-4" style={{ backgroundColor: c }} />
+              {t.charAt(0) + t.slice(1).toLowerCase()}
+            </span>
+          ))}
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" className="block">
+        <defs>
+          {Object.entries(EDGE_COLOR).map(([t, c]) => (
+            <marker key={t} id={`arrow-${t}`} markerWidth="6" markerHeight="6"
+              refX="5" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill={c} fillOpacity=".7" />
+            </marker>
+          ))}
+        </defs>
+        {/* Edges */}
+        {edges.map((e, i) => {
+          const s = nMap[e.source], t = nMap[e.target]
+          if (!s || !t) return null
+          const dx = t.x - s.x, dy = t.y - s.y
+          const len = Math.sqrt(dx * dx + dy * dy) || 1
+          const x1 = s.x + (dx / len) * R
+          const y1 = s.y + (dy / len) * R
+          const x2 = t.x - (dx / len) * (R + 4)
+          const y2 = t.y - (dy / len) * (R + 4)
+          const color = EDGE_COLOR[e.type as keyof typeof EDGE_COLOR] ?? '#999'
+          return (
+            <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
+              stroke={color} strokeWidth="1.5" strokeOpacity=".7"
+              markerEnd={`url(#arrow-${e.type})`} />
+          )
+        })}
+        {/* Nodes */}
+        {nodes.map(node => (
+          <g key={node.id}>
+            <circle cx={node.x} cy={node.y} r={R} fill="#17171c" />
+            <text x={node.x} y={node.y + 1} textAnchor="middle" dominantBaseline="middle"
+              fontSize="8" fill="white" fontFamily="monospace" fontWeight="600">
+              {node.label.slice(0, 3).toUpperCase()}
+            </text>
+            <text x={node.x} y={node.y + R + 10} textAnchor="middle"
+              fontSize="8" fill="#888" fontFamily="sans-serif">
+              {node.label}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
 export function RelationshipsPage({ documents }: Props) {
   const [rels, setRels]       = useState<Relationship[]>([])
   const [stats, setStats]     = useState<Stats | null>(null)
@@ -123,6 +230,9 @@ export function RelationshipsPage({ documents }: Props) {
           ))}
         </div>
       )}
+
+      {/* Network graph */}
+      {rels.length > 0 && <NetworkGraph rels={rels} docMap={docMap} />}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
