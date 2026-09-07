@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import uuid
 from typing import Optional
 
@@ -25,6 +26,13 @@ _FACT_KEYS = [
 ]
 
 
+def _sanitize(v):
+    """Replace non-JSON-compliant floats (nan/inf) with None."""
+    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+        return None
+    return v
+
+
 def _row_to_fact(row) -> dict:
     d = dict(zip(_FACT_KEYS, row))
     d["evidence_verified"] = bool(d["evidence_verified"])
@@ -32,7 +40,7 @@ def _row_to_fact(row) -> dict:
         d["attributes"] = json.loads(d["attributes"] or "{}")
     except Exception:
         d["attributes"] = {}
-    return d
+    return {k: _sanitize(v) for k, v in d.items()}
 
 
 # ─── List / filter facts ──────────────────────────────────────────────────────

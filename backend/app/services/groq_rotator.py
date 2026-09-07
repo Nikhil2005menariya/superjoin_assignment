@@ -41,6 +41,7 @@ def next_llm(**kwargs) -> ChatGroq:
         model=GROQ_MODEL,
         temperature=0,
         api_key=key,
+        max_tokens=700,   # stay under 1000 OTPM free-tier limit per call
         **kwargs,
     )
 

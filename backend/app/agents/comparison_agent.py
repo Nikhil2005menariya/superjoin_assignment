@@ -28,13 +28,13 @@ from qdrant_client.models import Filter, FieldCondition, MatchAny, MatchValue
 
 from app.config import get_settings
 from app.database.qdrant_client import get_qdrant, COLLECTION_NAME
-from app.services.groq_rotator import next_llm
+from app.services.llm_client import get_llm_json
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-BATCH_SIZE    = 4   # pairs per Groq call
-BATCH_DELAY   = 0.3
+BATCH_SIZE    = 4   # pairs per Bedrock call
+BATCH_DELAY   = 0.1
 MIN_SIM_SCORE = 0.78  # minimum dense cosine similarity to consider a pair
 MAX_CANDIDATES_PER_FACT = 5
 
@@ -225,9 +225,7 @@ async def classify_relationships_node(state: ComparisonState) -> ComparisonState
         )
 
         try:
-            resp     = await next_llm(
-                model_kwargs={"response_format": {"type": "json_object"}}
-            ).ainvoke([
+            resp     = await get_llm_json().ainvoke([
                 SystemMessage(content=SYSTEM_PROMPT),
                 HumanMessage(content=user_msg),
             ])

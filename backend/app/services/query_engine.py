@@ -22,7 +22,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import get_settings
 from app.services.retriever import hybrid_search
-from app.services.groq_rotator import next_llm
+from app.services.llm_client import get_llm
 
 logger   = logging.getLogger(__name__)
 settings = get_settings()
@@ -121,7 +121,7 @@ async def answer_query(
         f"Question: {question}"
     )
 
-    llm = next_llm()
+    llm = get_llm()
 
     try:
         resp   = await llm.ainvoke([

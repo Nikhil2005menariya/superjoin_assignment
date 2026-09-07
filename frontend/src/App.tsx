@@ -154,7 +154,7 @@ export default function App() {
                     'OCR fallback for image pages (Tesseract)',
                     'Deterministic table → natural language',
                     'Multi-granularity chunking',
-                    'Groq llama-3.3-70b fact extraction',
+                    'Amazon Nova 2 Lite fact extraction',
                     'rapidfuzz evidence verification',
                     'Domain-agnostic unit + time normalization',
                     'bge-large dense + BM25 sparse indexing',

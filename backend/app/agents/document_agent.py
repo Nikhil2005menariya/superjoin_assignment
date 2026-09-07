@@ -66,6 +66,12 @@ async def validate_node(state: DocumentState) -> DocumentState:
             total_pages=page_count,
             message=f"Validated — {page_count} pages detected",
         )
+        async with aiosqlite.connect(settings.db_path) as db:
+            await db.execute(
+                "UPDATE documents SET page_count = ?, updated_at = ? WHERE id = ?",
+                (page_count, datetime.utcnow().isoformat(), state["doc_id"]),
+            )
+            await db.commit()
         return {**state, "total_pages": page_count, "stage": "parsing", "progress": 5}
     except Exception as exc:
         return {**state, "error": str(exc)}
@@ -155,9 +161,9 @@ async def persist_chunks_node(state: DocumentState) -> DocumentState:
         now = datetime.utcnow().isoformat()
         async with aiosqlite.connect(settings.db_path) as db:
             await db.execute(
-                """INSERT INTO jobs (id, doc_id, status, stage, progress, message, created_at, updated_at)
-                   VALUES (?, ?, 'queued', 'pending', 0, 'Fact extraction queued', ?, ?)""",
-                (extraction_job_id, state["doc_id"], now, now),
+                """INSERT INTO jobs (id, doc_id, status, stage, progress, total_pages, message, created_at, updated_at)
+                   VALUES (?, ?, 'queued', 'pending', 0, ?, 'Fact extraction queued', ?, ?)""",
+                (extraction_job_id, state["doc_id"], state.get("total_pages", 0), now, now),
             )
             await db.commit()
         asyncio.create_task(run_extraction_pipeline(state["doc_id"], extraction_job_id))

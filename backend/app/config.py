@@ -3,9 +3,17 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
+    # LLM provider: "groq" or "bedrock"
+    llm_provider: str = "groq"
+    # Groq (3-key rotation)
     groq_api_key: str = ""
     groq_api_key_2: str = ""
     groq_api_key_3: str = ""
+    # AWS Bedrock
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_region: str = "us-east-1"
+    # Qdrant
     qdrant_host: str = "qdrant"
     qdrant_port: int = 6333
     max_upload_size_mb: int = 200
