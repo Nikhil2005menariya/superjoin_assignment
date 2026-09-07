@@ -22,20 +22,19 @@ from datetime import datetime
 from typing import Literal, Optional, TypedDict, List
 
 import aiosqlite
-from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
 from qdrant_client.models import Filter, FieldCondition, MatchAny, MatchValue
 
 from app.config import get_settings
 from app.database.qdrant_client import get_qdrant, COLLECTION_NAME
+from app.services.groq_rotator import next_llm
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-GROQ_MODEL    = "qwen/qwen3.8-27b"
 BATCH_SIZE    = 4   # pairs per Groq call
-BATCH_DELAY   = 0.5
+BATCH_DELAY   = 0.3
 MIN_SIM_SCORE = 0.78  # minimum dense cosine similarity to consider a pair
 MAX_CANDIDATES_PER_FACT = 5
 
@@ -210,13 +209,6 @@ async def classify_relationships_node(state: ComparisonState) -> ComparisonState
     if not pairs:
         return {**state, "relationships": []}
 
-    llm = ChatGroq(
-        model=GROQ_MODEL,
-        temperature=0,
-        api_key=settings.groq_api_key,
-        model_kwargs={"response_format": {"type": "json_object"}},
-    )
-
     relationships: list[dict] = []
     total_batches = max(1, (len(pairs) + BATCH_SIZE - 1) // BATCH_SIZE)
 
@@ -233,7 +225,9 @@ async def classify_relationships_node(state: ComparisonState) -> ComparisonState
         )
 
         try:
-            resp     = await llm.ainvoke([
+            resp     = await next_llm(
+                model_kwargs={"response_format": {"type": "json_object"}}
+            ).ainvoke([
                 SystemMessage(content=SYSTEM_PROMPT),
                 HumanMessage(content=user_msg),
             ])

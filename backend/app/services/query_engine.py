@@ -18,16 +18,15 @@ import logging
 from typing import Optional
 
 import aiosqlite
-from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import get_settings
 from app.services.retriever import hybrid_search
+from app.services.groq_rotator import next_llm
 
 logger   = logging.getLogger(__name__)
 settings = get_settings()
 
-GROQ_MODEL  = "qwen/qwen3.8-27b"
 MAX_FACTS   = 12   # facts sent to Groq in context
 
 SYSTEM_PROMPT = """You are a precise, grounded answer engine for a Fact Knowledge Layer.
@@ -122,11 +121,7 @@ async def answer_query(
         f"Question: {question}"
     )
 
-    llm = ChatGroq(
-        model=GROQ_MODEL,
-        temperature=0,
-        api_key=settings.groq_api_key,
-    )
+    llm = next_llm()
 
     try:
         resp   = await llm.ainvoke([

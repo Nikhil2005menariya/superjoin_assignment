@@ -29,15 +29,15 @@ from app.database.qdrant_client import get_qdrant, COLLECTION_NAME
 from app.services.evidence_verifier import verify_evidence
 from app.services.normalizer import normalize_fact
 from app.services.embedder import embed_single
+from app.services.groq_rotator import next_llm_json
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # ─── LLM setup ────────────────────────────────────────────────────────────────
 
-GROQ_MODEL = "qwen/qwen3.8-27b"
-BATCH_SIZE  = 3   # chunks per Groq call (rate-limit safe)
-BATCH_DELAY = 0.6 # seconds between batches
+BATCH_SIZE  = 6   # chunks per Groq call — larger batches = fewer calls
+BATCH_DELAY = 0.3 # seconds between batches
 
 SYSTEM_PROMPT = """You are a precise, domain-agnostic fact extraction engine.
 Extract every specific, verifiable claim from the text given by the user.
@@ -67,13 +67,6 @@ For each fact return these fields (use null for missing/unknown):
 Return ONLY valid JSON: {"facts": [...]}. Empty text → {"facts": []}."""
 
 
-def _build_llm() -> ChatGroq:
-    return ChatGroq(
-        model=GROQ_MODEL,
-        temperature=0,
-        api_key=settings.groq_api_key,
-        model_kwargs={"response_format": {"type": "json_object"}},
-    )
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
@@ -153,7 +146,6 @@ async def batch_extract_node(state: ExtractionState) -> ExtractionState:
     """
     doc_id  = state["doc_id"]
     chunks  = state["chunks"]
-    llm     = _build_llm()
     all_raw: list[dict] = []
 
     total_batches = max(1, (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE)
@@ -166,7 +158,7 @@ async def batch_extract_node(state: ExtractionState) -> ExtractionState:
         )
 
         try:
-            resp = await llm.ainvoke([
+            resp = await next_llm_json().ainvoke([
                 SystemMessage(content=SYSTEM_PROMPT),
                 HumanMessage(content=combined_text),
             ])

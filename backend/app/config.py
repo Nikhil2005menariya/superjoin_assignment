@@ -4,6 +4,8 @@ from functools import lru_cache
 
 class Settings(BaseSettings):
     groq_api_key: str = ""
+    groq_api_key_2: str = ""
+    groq_api_key_3: str = ""
     qdrant_host: str = "qdrant"
     qdrant_port: int = 6333
     max_upload_size_mb: int = 200
