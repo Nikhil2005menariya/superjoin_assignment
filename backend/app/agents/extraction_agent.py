@@ -402,6 +402,11 @@ async def persist_facts_node(state: ExtractionState) -> ExtractionState:
         ),
     )
     logger.info("[%s] Phase 2 complete: %d facts persisted (%d verified)", doc_id, len(facts), verified_count)
+
+    # Fire Phase 4: cross-document comparison (non-blocking)
+    from app.agents.comparison_agent import run_comparison_pipeline
+    asyncio.create_task(run_comparison_pipeline(doc_id))
+
     return {**state, "progress": 100}
 
 

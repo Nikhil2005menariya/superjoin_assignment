@@ -3,13 +3,14 @@
 @tailwind utilities;
 
 body {
-  font-family: 'Inter', system-ui, sans-serif;
-  @apply bg-gray-50 text-gray-900;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  background-color: #ffffff;
+  color: #17171c;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Smooth progress bar animation */
 @keyframes progress-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
+  50%       { opacity: 0.6; }
 }
-.progress-active { animation: progress-pulse 1.5s ease-in-out infinite; }
+.progress-active { animation: progress-pulse 1.8s ease-in-out infinite; }
