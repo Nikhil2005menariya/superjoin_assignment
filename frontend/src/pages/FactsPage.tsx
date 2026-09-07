@@ -50,16 +50,20 @@ export function FactsPage({ documents }: Props) {
     }
   }, [filterDoc, filterVerified, filterType])
 
+  const [searchMeta, setSearchMeta] = useState<{retrieval?: string; count: number} | null>(null)
+
   const searchFacts = useCallback(async () => {
     if (!query.trim() || query.length < 3) return
     setSearching(true)
+    setSearchMeta(null)
     try {
       const { data } = await api.get('/facts/search/semantic', { params: { q: query } })
-      // Fetch full facts for the returned IDs
-      const ids: string[] = data.map((h: any) => h.fact_id).filter(Boolean)
-      if (!ids.length) { setFacts([]); return }
+      const hits: any[] = data
+      const ids: string[] = hits.map((h: any) => h.fact_id).filter(Boolean)
+      if (!ids.length) { setFacts([]); setSearchMeta({ count: 0 }); return }
       const full = await Promise.all(ids.map((id: string) => api.get(`/facts/${id}`).then(r => r.data).catch(() => null)))
       setFacts(full.filter(Boolean))
+      setSearchMeta({ retrieval: hits[0]?.retrieval, count: ids.length })
     } finally {
       setSearching(false)
     }
@@ -151,11 +155,18 @@ export function FactsPage({ documents }: Props) {
 
       {/* Results header */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">
-          {loading ? 'Loading…' : `${facts.length} facts — ${verifiedCount} evidence-verified`}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="text-sm text-gray-500">
+            {loading ? 'Loading…' : `${facts.length} facts — ${verifiedCount} evidence-verified`}
+          </p>
+          {searchMeta?.retrieval && (
+            <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
+              {searchMeta.retrieval === 'colbert_hybrid' ? '⚡ ColBERT hybrid' : '📐 dense ANN'}
+            </span>
+          )}
+        </div>
         {query && (
-          <button onClick={() => { setQuery(''); loadFacts() }} className="text-xs text-brand-600 hover:underline">
+          <button onClick={() => { setQuery(''); setSearchMeta(null); loadFacts() }} className="text-xs text-brand-600 hover:underline">
             Clear search
           </button>
         )}

@@ -281,34 +281,36 @@ async def verify_normalize_node(state: ExtractionState) -> ExtractionState:
 
 async def embed_and_index_node(state: ExtractionState) -> ExtractionState:
     """
-    Embed each verified fact and upsert into Qdrant.
-    Uses dense (bge-large) + sparse (BM25). ColBERT added in Phase 3.
+    Embed each verified fact with all three vector types and upsert into Qdrant.
+    Phase 3: dense + BM25 sparse + ColBERT multi-vector (MaxSim late interaction).
     """
     doc_id = state["doc_id"]
     facts  = state.get("facts", [])
     qdrant = get_qdrant()
 
-    # Only embed evidence-verified facts (quality gate)
     to_embed = [f for f in facts if f["evidence_verified"]]
-    logger.info("[%s] Embedding %d verified facts", doc_id, len(to_embed))
+    logger.info("[%s] Embedding %d verified facts (dense + BM25 + ColBERT)", doc_id, len(to_embed))
 
     if not to_embed:
         return state
 
     points: list[PointStruct] = []
-    EMBED_BATCH = 16
+    EMBED_BATCH = 8  # smaller batch — ColBERT is more memory-intensive
 
     for i in range(0, len(to_embed), EMBED_BATCH):
-        batch = to_embed[i: i + EMBED_BATCH]
+        batch      = to_embed[i: i + EMBED_BATCH]
         statements = [f["statement"] for f in batch]
 
         try:
-            # Run embedding in thread pool (fastembed is CPU-bound)
             loop = asyncio.get_event_loop()
-            from app.services.embedder import embed_texts
-            emb_results = await loop.run_in_executor(None, embed_texts, statements)
+            from app.services.embedder import embed_texts, embed_colbert
 
-            for fact, emb in zip(batch, emb_results):
+            # Dense + sparse and ColBERT in parallel (both are CPU-bound in thread pool)
+            emb_task     = loop.run_in_executor(None, embed_texts, statements)
+            colbert_task = loop.run_in_executor(None, embed_colbert, statements)
+            emb_results, colbert_results = await asyncio.gather(emb_task, colbert_task)
+
+            for fact, emb, colbert_vecs in zip(batch, emb_results, colbert_results):
                 qdrant_id = str(uuid.uuid4())
                 fact["qdrant_point_id"] = qdrant_id
 
@@ -334,11 +336,12 @@ async def embed_and_index_node(state: ExtractionState) -> ExtractionState:
                         id=qdrant_id,
                         vector={
                             "dense":   emb.dense,
-                            "context": emb.dense,  # same for now; Phase 3 adds parent-para context
+                            "context": emb.dense,
                             "bm25":    SparseVector(
                                 indices=emb.sparse_indices,
                                 values=emb.sparse_values,
                             ),
+                            "colbert": colbert_vecs,  # list of 128-dim token vectors
                         },
                         payload=payload,
                     )
@@ -349,7 +352,7 @@ async def embed_and_index_node(state: ExtractionState) -> ExtractionState:
 
     if points:
         await qdrant.upsert(collection_name=COLLECTION_NAME, points=points)
-        logger.info("[%s] Upserted %d points to Qdrant", doc_id, len(points))
+        logger.info("[%s] Upserted %d points (dense+BM25+ColBERT) to Qdrant", doc_id, len(points))
 
     return state
 

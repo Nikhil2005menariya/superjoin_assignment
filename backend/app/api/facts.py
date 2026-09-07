@@ -1,14 +1,16 @@
 import json
 import logging
+import uuid
 from typing import Optional
 
 import aiosqlite
-from fastapi import APIRouter, HTTPException, Query
-from qdrant_client.models import Filter, FieldCondition, MatchValue
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from qdrant_client.models import Filter, FieldCondition, MatchValue, SparseVector, PointStruct
 
 from app.config import get_settings
 from app.database.qdrant_client import get_qdrant, COLLECTION_NAME
 from app.services.embedder import embed_single
+from app.services.retriever import hybrid_search
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -110,41 +112,79 @@ async def search_facts(
     limit:  int = Query(20, le=100),
 ):
     """
-    Hybrid dense search via Qdrant.
-    Embeds the query with bge-large and retrieves the top-k most similar facts.
-    Phase 3 will add ColBERT reranking on top.
+    Three-stage hybrid retrieval: BM25 recall → dense ANN → ColBERT MaxSim rerank.
+    Returns facts ranked by ColBERT late-interaction similarity.
+    Falls back to dense-only if ColBERT vectors not yet available.
     """
+    return await hybrid_search(query=q, doc_id=doc_id, limit=limit)
+
+
+# ─── Reindex endpoint (backfill ColBERT for Phase-2 facts) ───────────────────
+
+@router.post("/admin/reindex-colbert")
+async def reindex_colbert(background_tasks: BackgroundTasks):
+    """
+    Backfill ColBERT vectors for all facts already indexed in Qdrant
+    without colbert vectors (i.e. facts indexed in Phase 2).
+    Runs in background — returns immediately.
+    """
+    background_tasks.add_task(_run_colbert_backfill)
+    return {"status": "reindex started"}
+
+
+async def _run_colbert_backfill():
+    """Re-embed all Qdrant points that are missing the colbert vector."""
     import asyncio
-    loop = asyncio.get_event_loop()
-    emb = await loop.run_in_executor(None, embed_single, q)
-    dense_vec = emb["dense"]
 
-    qdrant_filter = None
-    if doc_id:
-        qdrant_filter = Filter(
-            must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
-        )
-
+    logger.info("ColBERT backfill: starting")
     qdrant = get_qdrant()
-    results = await qdrant.search(
-        collection_name=COLLECTION_NAME,
-        query_vector=("dense", dense_vec),
-        query_filter=qdrant_filter,
-        limit=limit,
-        with_payload=True,
-    )
 
-    hits = []
-    for r in results:
-        hits.append({
-            "fact_id":    r.payload.get("fact_id"),
-            "score":      round(r.score, 4),
-            "statement":  r.payload.get("statement"),
-            "subject":    r.payload.get("subject"),
-            "doc_id":     r.payload.get("doc_id"),
-            "confidence": r.payload.get("confidence"),
-        })
-    return hits
+    # Scroll through all points
+    offset = None
+    total_updated = 0
+
+    while True:
+        result = await qdrant.scroll(
+            collection_name=COLLECTION_NAME,
+            with_payload=True,
+            with_vectors=["colbert"],
+            limit=50,
+            offset=offset,
+        )
+        points, next_offset = result
+
+        if not points:
+            break
+
+        # Only process points without colbert
+        missing = [p for p in points if not p.vector or not p.vector.get("colbert")]
+
+        if missing:
+            statements = [p.payload.get("statement", "") for p in missing]
+            ids = [p.id for p in missing]
+
+            try:
+                loop = asyncio.get_event_loop()
+                from app.services.embedder import embed_colbert
+                colbert_mats = await loop.run_in_executor(None, embed_colbert, statements)
+
+                for point_id, colbert_vecs in zip(ids, colbert_mats):
+                    await qdrant.update_vectors(
+                        collection_name=COLLECTION_NAME,
+                        points=[
+                            {"id": point_id, "vector": {"colbert": colbert_vecs}}
+                        ],
+                    )
+                total_updated += len(missing)
+                logger.info("ColBERT backfill: updated %d points (total %d)", len(missing), total_updated)
+            except Exception as e:
+                logger.error("ColBERT backfill error: %s", e)
+
+        if next_offset is None:
+            break
+        offset = next_offset
+
+    logger.info("ColBERT backfill complete: %d facts updated", total_updated)
 
 
 # ─── Stats ────────────────────────────────────────────────────────────────────

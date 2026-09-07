@@ -65,7 +65,7 @@ export default function App() {
             </div>
           </div>
           <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
-            Phase 2 — Fact Extraction
+            Phase 3 — ColBERT Hybrid Retrieval
           </span>
         </div>
       </header>
@@ -76,8 +76,8 @@ export default function App() {
           <ol className="flex items-center gap-1 text-xs">
             {[
               { n: 1, label: 'Doc Intelligence', done: true },
-              { n: 2, label: 'Fact Extraction',  done: false, active: true },
-              { n: 3, label: 'ColBERT Indexing', done: false },
+              { n: 2, label: 'Fact Extraction',  done: true },
+              { n: 3, label: 'ColBERT Indexing', done: false, active: true },
               { n: 4, label: 'KG Comparison',    done: false },
               { n: 5, label: 'Query & UI',        done: false },
             ].map(({ n, label, done, active }) => (

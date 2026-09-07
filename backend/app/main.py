@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Fact Knowledge Layer",
     description="Extract, link, and compare facts across any PDF documents.",
-    version="1.0.0-phase1",
+    version="1.0.0-phase3",
     lifespan=lifespan,
 )
 
