@@ -27,7 +27,7 @@ from app.services.retriever import hybrid_search
 logger   = logging.getLogger(__name__)
 settings = get_settings()
 
-GROQ_MODEL  = "llama-3.3-70b-versatile"
+GROQ_MODEL  = "qwen/qwen3.8-27b"
 MAX_FACTS   = 12   # facts sent to Groq in context
 
 SYSTEM_PROMPT = """You are a precise, grounded answer engine for a Fact Knowledge Layer.

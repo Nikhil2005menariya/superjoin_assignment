@@ -7,7 +7,7 @@ Graph:
   Any node → handle_error → END on failure.
 
 Auto-triggered by Phase 1's persist_chunks node.
-Uses Groq llama-3.3-70b-versatile with JSON mode for structured extraction.
+Uses Groq qwen/qwen3.8-27b with JSON mode for structured extraction.
 """
 
 import asyncio
@@ -35,7 +35,7 @@ settings = get_settings()
 
 # ─── LLM setup ────────────────────────────────────────────────────────────────
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "qwen/qwen3.8-27b"
 BATCH_SIZE  = 3   # chunks per Groq call (rate-limit safe)
 BATCH_DELAY = 0.6 # seconds between batches
 

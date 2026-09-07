@@ -33,7 +33,7 @@ from app.database.qdrant_client import get_qdrant, COLLECTION_NAME
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-GROQ_MODEL    = "llama-3.3-70b-versatile"
+GROQ_MODEL    = "qwen/qwen3.8-27b"
 BATCH_SIZE    = 4   # pairs per Groq call
 BATCH_DELAY   = 0.5
 MIN_SIM_SCORE = 0.78  # minimum dense cosine similarity to consider a pair
