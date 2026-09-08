@@ -5,30 +5,26 @@ import { api, Document } from '../api/client'
 
 interface Props { documents: Document[] }
 
-interface RelFact {
-  id: string
-  statement: string
-  subject: string | null
-  predicate: string | null
-  value_raw: string | null
-  unit_raw: string | null
-  time_period_raw: string | null
-  doc_id: string
-  fact_type: string
-  confidence: number
+interface PageInfo {
+  page_num: number
+  summary: string | null
+  md_path: string | null
 }
 
-interface Relationship {
+interface PageRel {
   id: string
-  fact_a_id: string
-  fact_b_id: string
-  type: 'CORROBORATES' | 'CONTRADICTS' | 'RECONCILES'
+  page_a_id: string
+  page_b_id: string
+  doc_a_id: string
+  doc_b_id: string
+  doc_a_filename: string
+  doc_b_filename: string
+  type: 'CORROBORATES' | 'CONTRADICTS' | 'RECONCILES' | 'RELATED'
   explanation: string
-  reconciliation_context: string | null
   confidence: number
   created_at: string
-  fact_a: RelFact | null
-  fact_b: RelFact | null
+  page_a: PageInfo | null
+  page_b: PageInfo | null
 }
 
 interface Stats {
@@ -36,16 +32,18 @@ interface Stats {
   corroborates: number
   contradicts: number
   reconciles: number
+  related: number
   avg_confidence: number | null
 }
 
 const TYPE_CONFIG = {
-  CORROBORATES: { label: 'Corroborates', dot: 'bg-deep-green', text: 'text-deep-green' },
-  CONTRADICTS:  { label: 'Contradicts',  dot: 'bg-error-red',  text: 'text-error-red'  },
-  RECONCILES:   { label: 'Reconciles',   dot: 'bg-slate',      text: 'text-slate'       },
+  CORROBORATES: { label: 'Corroborates', dot: 'bg-deep-green',  text: 'text-deep-green' },
+  CONTRADICTS:  { label: 'Contradicts',  dot: 'bg-error-red',   text: 'text-error-red'  },
+  RECONCILES:   { label: 'Reconciles',   dot: 'bg-slate',       text: 'text-slate'      },
+  RELATED:      { label: 'Related',      dot: 'bg-muted',       text: 'text-muted'      },
 } as const
 
-function RelTypeBadge({ type }: { type: string }) {
+function TypeBadge({ type }: { type: string }) {
   const cfg = TYPE_CONFIG[type as keyof typeof TYPE_CONFIG]
   if (!cfg) return null
   return (
@@ -56,59 +54,55 @@ function RelTypeBadge({ type }: { type: string }) {
   )
 }
 
-function FactSnippet({ fact, docName }: { fact: RelFact | null; docName: string }) {
-  if (!fact) return <p className="text-xs text-muted italic">Fact unavailable</p>
+function PageCard({ page, docName }: { page: PageInfo | null; docName: string }) {
+  if (!page) return <p className="text-xs text-muted italic">Page data unavailable</p>
   return (
     <div className="space-y-1">
-      <p className="text-xs leading-relaxed text-ink">{fact.statement}</p>
-      <div className="flex flex-wrap gap-2">
-        {fact.subject && <span className="text-xs text-muted">{fact.subject}</span>}
-        {fact.value_raw && fact.unit_raw && (
-          <span className="rounded-xs bg-stone px-1.5 py-px font-mono text-[10px] text-ink">
-            {fact.value_raw} {fact.unit_raw}
-          </span>
-        )}
-        {fact.time_period_raw && <span className="text-xs text-muted">{fact.time_period_raw}</span>}
-        <span className="rounded-xs border border-hairline px-1.5 py-px font-mono text-[10px] text-muted">{docName}</span>
-      </div>
+      <p className="font-mono text-[10px] text-muted">
+        {docName} · Page {page.page_num}
+      </p>
+      {page.summary && (
+        <p className="text-xs leading-relaxed text-ink line-clamp-3">{page.summary}</p>
+      )}
     </div>
   )
 }
 
-// ─── Network graph ────────────────────────────────────────────────────────────
+// ─── Document network graph ───────────────────────────────────────────────────
 
 const EDGE_COLOR = {
   CORROBORATES: '#003c33',
   CONTRADICTS:  '#e53935',
   RECONCILES:   '#6b7280',
+  RELATED:      '#d1d5db',
 } as const
 
 interface GraphNode { id: string; label: string; x: number; y: number }
 interface GraphEdge { source: string; target: string; type: string }
 
-function NetworkGraph({ rels, docMap }: { rels: Relationship[]; docMap: Record<string, string> }) {
-  const W = 560, H = 260, R = 22
+function NetworkGraph({ rels, docMap }: { rels: PageRel[]; docMap: Record<string, string> }) {
+  const W = 560, H = 240, R = 22
 
   const { nodes, edges } = useMemo(() => {
     const docIds = Array.from(new Set(
-      rels.flatMap(r => [r.fact_a?.doc_id, r.fact_b?.doc_id].filter(Boolean) as string[])
+      rels.flatMap(r => [r.doc_a_id, r.doc_b_id].filter(Boolean))
     ))
     const n = docIds.length
     const nodes: GraphNode[] = docIds.map((id, i) => {
       const angle = (2 * Math.PI * i) / n - Math.PI / 2
-      const cx = W / 2 + (n === 1 ? 0 : (W / 2 - 50)) * Math.cos(angle)
-      const cy = H / 2 + (n === 1 ? 0 : (H / 2 - 40)) * Math.sin(angle)
-      return { id, label: (docMap[id] ?? id).replace(/\.[^.]+$/, '').slice(0, 18), x: cx, y: cy }
+      const cx = W / 2 + (n === 1 ? 0 : (W / 2 - 60)) * Math.cos(angle)
+      const cy = H / 2 + (n === 1 ? 0 : (H / 2 - 36)) * Math.sin(angle)
+      const label = (docMap[id] ?? id).replace(/\.[^.]+$/, '').slice(0, 16)
+      return { id, label, x: cx, y: cy }
     })
     const seen = new Set<string>()
     const edges: GraphEdge[] = []
     for (const r of rels) {
-      const a = r.fact_a?.doc_id, b = r.fact_b?.doc_id
-      if (!a || !b || a === b) continue
-      const key = [a, b].sort().join('|') + r.type
+      if (!r.doc_a_id || !r.doc_b_id || r.doc_a_id === r.doc_b_id) continue
+      const key = [r.doc_a_id, r.doc_b_id].sort().join('|') + r.type
       if (seen.has(key)) continue
       seen.add(key)
-      edges.push({ source: a, target: b, type: r.type })
+      edges.push({ source: r.doc_a_id, target: r.doc_b_id, type: r.type })
     }
     return { nodes, edges }
   }, [rels, docMap])
@@ -120,16 +114,11 @@ function NetworkGraph({ rels, docMap }: { rels: Relationship[]; docMap: Record<s
   return (
     <div className="rounded-sm border border-hairline bg-canvas">
       <div className="flex items-center gap-2 border-b border-hairline px-4 py-2.5">
-        <svg className="h-3.5 w-3.5 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="19" r="2"/>
-          <line x1="5" y1="7" x2="12" y2="17"/><line x1="19" y1="7" x2="12" y2="17"/>
-          <line x1="7" y1="5" x2="17" y2="5"/>
-        </svg>
         <p className="font-mono text-[10px] uppercase tracking-widest text-muted">Document network</p>
-        <div className="ml-auto flex items-center gap-3">
-          {Object.entries(EDGE_COLOR).map(([t, c]) => (
-            <span key={t} className="flex items-center gap-1 text-[10px] text-muted">
-              <span className="inline-block h-px w-4" style={{ backgroundColor: c }} />
+        <div className="ml-auto flex items-center gap-4">
+          {(['CORROBORATES', 'CONTRADICTS', 'RECONCILES'] as const).map(t => (
+            <span key={t} className="flex items-center gap-1.5 text-[10px] text-muted">
+              <span className="inline-block h-px w-4" style={{ backgroundColor: EDGE_COLOR[t] }} />
               {t.charAt(0) + t.slice(1).toLowerCase()}
             </span>
           ))}
@@ -137,14 +126,13 @@ function NetworkGraph({ rels, docMap }: { rels: Relationship[]; docMap: Record<s
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" className="block">
         <defs>
-          {Object.entries(EDGE_COLOR).map(([t, c]) => (
-            <marker key={t} id={`arrow-${t}`} markerWidth="6" markerHeight="6"
+          {(Object.keys(EDGE_COLOR) as Array<keyof typeof EDGE_COLOR>).map(t => (
+            <marker key={t} id={`arr-${t}`} markerWidth="6" markerHeight="6"
               refX="5" refY="3" orient="auto">
-              <path d="M0,0 L0,6 L6,3 z" fill={c} fillOpacity=".7" />
+              <path d="M0,0 L0,6 L6,3 z" fill={EDGE_COLOR[t]} fillOpacity=".7" />
             </marker>
           ))}
         </defs>
-        {/* Edges */}
         {edges.map((e, i) => {
           const s = nMap[e.source], t = nMap[e.target]
           if (!s || !t) return null
@@ -157,11 +145,10 @@ function NetworkGraph({ rels, docMap }: { rels: Relationship[]; docMap: Record<s
           const color = EDGE_COLOR[e.type as keyof typeof EDGE_COLOR] ?? '#999'
           return (
             <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
-              stroke={color} strokeWidth="1.5" strokeOpacity=".7"
-              markerEnd={`url(#arrow-${e.type})`} />
+              stroke={color} strokeWidth="1.5" strokeOpacity=".8"
+              markerEnd={`url(#arr-${e.type})`} />
           )
         })}
-        {/* Nodes */}
         {nodes.map(node => (
           <g key={node.id}>
             <circle cx={node.x} cy={node.y} r={R} fill="#17171c" />
@@ -183,9 +170,9 @@ function NetworkGraph({ rels, docMap }: { rels: Relationship[]; docMap: Record<s
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function RelationshipsPage({ documents }: Props) {
-  const [rels, setRels]       = useState<Relationship[]>([])
-  const [stats, setStats]     = useState<Stats | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [rels, setRels]           = useState<PageRel[]>([])
+  const [stats, setStats]         = useState<Stats | null>(null)
+  const [loading, setLoading]     = useState(false)
   const [filterDoc, setFilterDoc] = useState('')
   const [filterType, setFilterType] = useState('')
 
@@ -197,7 +184,6 @@ export function RelationshipsPage({ documents }: Props) {
       const params: Record<string, string> = {}
       if (filterDoc)  params.doc_id   = filterDoc
       if (filterType) params.rel_type = filterType
-
       const [rRes, sRes] = await Promise.all([
         api.get('/relationships', { params }),
         api.get('/relationships/stats/summary'),
@@ -254,6 +240,7 @@ export function RelationshipsPage({ documents }: Props) {
           <option value="CORROBORATES">Corroborates</option>
           <option value="CONTRADICTS">Contradicts</option>
           <option value="RECONCILES">Reconciles</option>
+          <option value="RELATED">Related</option>
         </select>
 
         <button
@@ -265,63 +252,54 @@ export function RelationshipsPage({ documents }: Props) {
         </button>
       </div>
 
-      {/* Result header */}
       <p className="text-sm text-muted">
-        {loading ? 'Loading…' : `${rels.length} relationships detected across documents`}
+        {loading ? 'Loading…' : `${rels.length} page-level relationships across documents`}
       </p>
 
-      {/* Relationship list */}
       {loading ? (
         <div className="flex justify-center py-16">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-ink border-t-transparent" />
         </div>
       ) : rels.length === 0 ? (
         <div className="rounded-sm border border-dashed border-hairline p-16 text-center">
-          <p className="text-sm text-muted">No relationships yet.</p>
+          <p className="text-sm text-muted">No cross-document relationships yet.</p>
           <p className="mt-1 text-xs text-muted">
-            Upload two or more documents — cross-document comparison runs automatically.
+            Upload two or more documents — cross-doc linking runs automatically after ingestion.
           </p>
         </div>
       ) : (
         <div className="space-y-3">
-          {rels.map(rel => {
-            const docAName = rel.fact_a ? (docMap[rel.fact_a.doc_id] ?? rel.fact_a.doc_id.slice(0, 8)) : '—'
-            const docBName = rel.fact_b ? (docMap[rel.fact_b.doc_id] ?? rel.fact_b.doc_id.slice(0, 8)) : '—'
-            return (
-              <article key={rel.id} className="rounded-sm border border-hairline bg-canvas">
-                {/* Header row */}
-                <div className="flex items-center justify-between border-b border-hairline px-4 py-2.5">
-                  <RelTypeBadge type={rel.type} />
-                  <span className="font-mono text-[10px] text-muted">
-                    {Math.round(rel.confidence * 100)}% confidence
-                  </span>
-                </div>
+          {rels.map(rel => (
+            <article key={rel.id} className="rounded-sm border border-hairline bg-canvas">
+              <div className="flex items-center justify-between border-b border-hairline px-4 py-2.5">
+                <TypeBadge type={rel.type} />
+                <span className="font-mono text-[10px] text-muted">
+                  {Math.round(rel.confidence * 100)}% similarity
+                </span>
+              </div>
 
-                {/* Two facts side by side */}
-                <div className="grid gap-px bg-hairline sm:grid-cols-2">
-                  <div className="bg-canvas px-4 py-3">
-                    <p className="mb-2 font-mono text-[10px] uppercase tracking-widest text-muted">Fact A</p>
-                    <FactSnippet fact={rel.fact_a} docName={docAName} />
-                  </div>
-                  <div className="bg-canvas px-4 py-3">
-                    <p className="mb-2 font-mono text-[10px] uppercase tracking-widest text-muted">Fact B</p>
-                    <FactSnippet fact={rel.fact_b} docName={docBName} />
-                  </div>
+              <div className="grid gap-px bg-hairline sm:grid-cols-2">
+                <div className="bg-canvas px-4 py-3">
+                  <p className="mb-2 font-mono text-[10px] uppercase tracking-widest text-muted">Page A</p>
+                  <PageCard
+                    page={rel.page_a}
+                    docName={rel.doc_a_filename ?? rel.doc_a_id?.slice(0, 8) ?? ''}
+                  />
                 </div>
+                <div className="bg-canvas px-4 py-3">
+                  <p className="mb-2 font-mono text-[10px] uppercase tracking-widest text-muted">Page B</p>
+                  <PageCard
+                    page={rel.page_b}
+                    docName={rel.doc_b_filename ?? rel.doc_b_id?.slice(0, 8) ?? ''}
+                  />
+                </div>
+              </div>
 
-                {/* Explanation */}
-                <div className="border-t border-hairline px-4 py-3">
-                  <p className="text-xs leading-relaxed text-body-muted">{rel.explanation}</p>
-                  {rel.reconciliation_context && (
-                    <p className="mt-1 text-xs text-muted">
-                      <span className="font-mono uppercase tracking-wider">Reconciliation: </span>
-                      {rel.reconciliation_context}
-                    </p>
-                  )}
-                </div>
-              </article>
-            )
-          })}
+              <div className="border-t border-hairline px-4 py-3">
+                <p className="text-xs leading-relaxed text-body-muted">{rel.explanation}</p>
+              </div>
+            </article>
+          ))}
         </div>
       )}
     </div>

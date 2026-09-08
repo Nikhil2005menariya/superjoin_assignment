@@ -1,31 +1,22 @@
 import React, { useState, useCallback, useRef } from 'react'
-import { ArrowRight, ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import clsx from 'clsx'
 import { api, Document } from '../api/client'
 
 interface Props { documents: Document[] }
 
-interface SourceFact {
-  id: string
-  doc_id: string
-  statement: string
-  subject: string | null
-  predicate: string | null
-  value_raw: string | null
-  unit_raw: string | null
-  time_period_raw: string | null
-  scope: string | null
-  fact_type: string
-  confidence: number
-  exact_quote: string | null
-  evidence_verified: boolean
+interface RetrievalMeta {
+  hits: number
+  md_files?: number
+  chunks?: number
+  method: string
 }
 
 interface QueryResult {
   answer: string
-  source_facts: SourceFact[]
+  source_facts: unknown[]
   confidence: 'HIGH' | 'MEDIUM' | 'LOW'
-  retrieval_meta: { hits: number; used: number; method: string }
+  retrieval_meta: RetrievalMeta
   caveat: string | null
 }
 
@@ -35,60 +26,21 @@ const CONFIDENCE_STYLE = {
   LOW:    'bg-stone text-muted border-hairline',
 }
 
-function SourceCard({ fact, docName }: { fact: SourceFact; docName: string }) {
-  const [open, setOpen] = useState(false)
+const EXAMPLES = [
+  'What was the total revenue for the last reported period?',
+  'Are there any contradictions across the uploaded documents?',
+  'What growth metrics are reported across the documents?',
+  'Which documents mention EBITDA or operating profit?',
+  'Are there any facts about headcount or employee numbers?',
+]
+
+function MetaTag({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-xs border border-hairline bg-canvas">
-      <button
-        className="flex w-full items-start gap-3 px-3 py-2.5 text-left"
-        onClick={() => setOpen(v => !v)}
-      >
-        <div className={clsx(
-          'mt-1 h-1.5 w-1.5 shrink-0 rounded-full',
-          fact.evidence_verified ? 'bg-deep-green' : 'bg-muted',
-        )} />
-        <div className="min-w-0 flex-1">
-          <p className="text-xs leading-snug text-ink">{fact.statement}</p>
-          <div className="mt-1.5 flex flex-wrap gap-2">
-            {fact.subject && <span className="text-[10px] text-muted">{fact.subject}</span>}
-            {fact.value_raw && fact.unit_raw && (
-              <span className="rounded-xs bg-stone px-1.5 py-px font-mono text-[10px] text-ink">
-                {fact.value_raw} {fact.unit_raw}
-              </span>
-            )}
-            {fact.time_period_raw && (
-              <span className="text-[10px] text-muted">{fact.time_period_raw}</span>
-            )}
-            <span className="rounded-xs border border-hairline px-1.5 py-px font-mono text-[10px] text-muted">
-              {docName}
-            </span>
-          </div>
-        </div>
-        <div className="shrink-0 text-muted">
-          {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-        </div>
-      </button>
-      {open && fact.exact_quote && (
-        <div className="border-t border-hairline px-3 pb-3 pt-2">
-          <p className="mb-1 font-mono text-[9px] uppercase tracking-widest text-muted">
-            Source evidence
-          </p>
-          <blockquote className="border-l-2 border-deep-green pl-2.5 text-[11px] italic leading-relaxed text-body-muted">
-            {fact.exact_quote}
-          </blockquote>
-        </div>
-      )}
-    </div>
+    <span className="rounded-xs border border-hairline px-2 py-0.5 font-mono text-[10px] text-muted">
+      {label}: {value}
+    </span>
   )
 }
-
-const EXAMPLES = [
-  'What was the total revenue last fiscal year?',
-  'Are there any facts about profit margins?',
-  'Which documents mention headcount or employee numbers?',
-  'What growth metrics are reported across the documents?',
-  'Are there any contradicting figures for the same metric?',
-]
 
 export function QueryPage({ documents }: Props) {
   const [question, setQuestion] = useState('')
@@ -97,8 +49,6 @@ export function QueryPage({ documents }: Props) {
   const [filterDoc, setFilterDoc] = useState('')
   const [error, setError]       = useState<string | null>(null)
   const textareaRef             = useRef<HTMLTextAreaElement>(null)
-
-  const docMap = Object.fromEntries(documents.map(d => [d.id, d.filename]))
 
   const submit = useCallback(async (q: string) => {
     const trimmed = q.trim()
@@ -110,7 +60,7 @@ export function QueryPage({ documents }: Props) {
       const { data } = await api.post('/query', {
         question: trimmed,
         doc_id: filterDoc || undefined,
-        limit: 12,
+        limit: 10,
       })
       setResult(data)
     } catch (err: any) {
@@ -123,6 +73,8 @@ export function QueryPage({ documents }: Props) {
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(question)
   }
+
+  const meta = result?.retrieval_meta
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -201,22 +153,30 @@ export function QueryPage({ documents }: Props) {
 
       {/* Result */}
       {result && (
-        <div className="space-y-6">
+        <div className="space-y-4">
 
           {/* Answer */}
           <div className="rounded-sm border border-hairline bg-canvas">
             <div className="flex items-center justify-between border-b border-hairline px-4 py-2.5">
               <p className="font-mono text-[10px] uppercase tracking-widest text-muted">Answer</p>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap justify-end">
                 <span className={clsx(
                   'rounded-xs border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider',
                   CONFIDENCE_STYLE[result.confidence],
                 )}>
                   {result.confidence} confidence
                 </span>
-                <span className="font-mono text-[10px] text-muted">
-                  {result.retrieval_meta.used} facts · {result.retrieval_meta.method === 'colbert_hybrid' ? 'ColBERT' : 'Dense'}
-                </span>
+                {meta && (
+                  <>
+                    {meta.md_files !== undefined && (
+                      <MetaTag label="pages read" value={meta.md_files} />
+                    )}
+                    {meta.chunks !== undefined && (
+                      <MetaTag label="chunks" value={meta.chunks} />
+                    )}
+                    <MetaTag label="method" value={meta.method} />
+                  </>
+                )}
               </div>
             </div>
             <div className="px-4 py-4">
@@ -227,23 +187,6 @@ export function QueryPage({ documents }: Props) {
             </div>
           </div>
 
-          {/* Source facts */}
-          {result.source_facts.length > 0 && (
-            <div>
-              <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-muted">
-                Source facts ({result.source_facts.length})
-              </p>
-              <div className="space-y-2">
-                {result.source_facts.map(f => (
-                  <SourceCard
-                    key={f.id}
-                    fact={f}
-                    docName={docMap[f.doc_id] ?? f.doc_id.slice(0, 8)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>

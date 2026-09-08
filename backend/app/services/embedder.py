@@ -1,26 +1,25 @@
 """
-Embedder service — fastembed-based, ONNX runtime (no heavy torch).
+Embedder service — fastembed ONNX, no torch.
 
-Provides three embedding types, all loaded lazily as singletons:
-  dense    : BAAI/bge-large-en-v1.5  (1024-dim) — semantic ANN retrieval
-  sparse   : Qdrant/bm25             — keyword recall
-  colbert  : colbert-ir/colbertv2.0  (128-dim per token) — MaxSim late interaction
+Dense:  BAAI/bge-small-en-v1.5  (384-dim, ~130 MB) — semantic ANN retrieval
+Sparse: Qdrant/bm25              (no RAM, computed on-the-fly) — keyword recall
+
+bge-small is ~10× smaller than bge-large with competitive retrieval quality,
+making it deployable on 1–2 GB instances.
+ColBERT is excluded — its ONNX model has a fixed input-shape bug with fastembed.
 """
 
 import logging
 import os
 from typing import Optional
 
-import numpy as np
-
 logger = logging.getLogger(__name__)
 
-_dense_model   = None
-_sparse_model  = None
-_colbert_model = None
+_dense_model  = None
+_sparse_model = None
 
 
-def _load_dense_sparse():
+def _load_models():
     global _dense_model, _sparse_model
     if _dense_model is not None:
         return
@@ -30,31 +29,19 @@ def _load_dense_sparse():
     cache = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
     os.makedirs(cache, exist_ok=True)
 
-    logger.info("Loading dense model bge-large-en-v1.5 …")
-    _dense_model = TextEmbedding(model_name="BAAI/bge-large-en-v1.5", cache_dir=cache)
-
-    logger.info("Loading sparse BM25 model …")
-    _sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25", cache_dir=cache)
-
-    logger.info("Dense + sparse models ready")
-
-
-def _load_colbert():
-    global _colbert_model
-    if _colbert_model is not None:
-        return
-
-    from fastembed import LateInteractionTextEmbedding
-
-    cache = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
-    os.makedirs(cache, exist_ok=True)
-
-    logger.info("Loading ColBERT model colbert-ir/colbertv2.0 …")
-    _colbert_model = LateInteractionTextEmbedding(
-        model_name="colbert-ir/colbertv2.0",
+    logger.info("Loading dense model bge-small-en-v1.5 (~130 MB) …")
+    _dense_model = TextEmbedding(
+        model_name="BAAI/bge-small-en-v1.5",
         cache_dir=cache,
     )
-    logger.info("ColBERT model ready")
+
+    logger.info("Loading BM25 sparse model …")
+    _sparse_model = SparseTextEmbedding(
+        model_name="Qdrant/bm25",
+        cache_dir=cache,
+    )
+
+    logger.info("Dense (384-dim) + BM25 models ready")
 
 
 class EmbedResult:
@@ -72,11 +59,8 @@ class EmbedResult:
 
 
 def embed_texts(texts: list[str]) -> list[EmbedResult]:
-    """
-    Dense + sparse batch embedding.
-    Used during fact indexing (without ColBERT — that's called separately).
-    """
-    _load_dense_sparse()
+    """Dense + BM25 batch embedding."""
+    _load_models()
 
     dense_vecs  = list(_dense_model.embed(texts))
     sparse_vecs = list(_sparse_model.embed(texts))
@@ -91,47 +75,20 @@ def embed_texts(texts: list[str]) -> list[EmbedResult]:
     ]
 
 
-def embed_colbert(texts: list[str]) -> list[list[list[float]]]:
-    """
-    ColBERT late-interaction embedding.
-
-    Returns a list of token matrices — one per input text.
-    Each token matrix is a list of 128-dim vectors (one per token).
-    Format is directly usable as a Qdrant multi-vector point.
-    """
-    _load_colbert()
-    token_mats = list(_colbert_model.embed(texts))
-    return [mat.tolist() for mat in token_mats]
-
-
-def embed_query(text: str) -> dict:
-    """
-    Embed a search query with all three methods.
-    Returns a dict ready for the hybrid retrieval pipeline.
-    """
-    dense_sparse = embed_texts([text])[0]
-    colbert_mats = embed_colbert([text])
-
+def embed_query(query: str) -> dict:
+    """Embed a search query for hybrid retrieval."""
+    r = embed_texts([query])[0]
     return {
-        "dense":          dense_sparse.dense,
-        "sparse_indices": dense_sparse.sparse_indices,
-        "sparse_values":  dense_sparse.sparse_values,
-        "colbert":        colbert_mats[0],   # list of 128-dim token vectors
+        "dense":          r.dense,
+        "sparse_indices": r.sparse_indices,
+        "sparse_values":  r.sparse_values,
     }
 
 
 def embed_single(text: str, context: Optional[str] = None) -> dict:
-    """
-    Backwards-compatible: embed one text for context-aware upsert.
-    """
-    texts   = [text, context or text]
-    results = embed_texts(texts)
-
+    """Backwards-compatible single-text embed."""
+    r = embed_texts([text])[0]
     return {
-        "dense":   results[0].dense,
-        "context": results[1].dense,
-        "sparse":  {
-            "indices": results[0].sparse_indices,
-            "values":  results[0].sparse_values,
-        },
+        "dense":  r.dense,
+        "sparse": {"indices": r.sparse_indices, "values": r.sparse_values},
     }

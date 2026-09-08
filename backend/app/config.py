@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 200
     log_level: str = "INFO"
     data_dir: str = "/app/data"
+    pages_dir: str = "/app/data/pages"
     uploads_dir: str = "/app/uploads"
     db_path: str = "/app/data/knowledge.db"
 

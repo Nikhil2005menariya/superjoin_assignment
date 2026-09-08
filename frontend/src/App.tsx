@@ -1,22 +1,23 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
-import { Document, Job, listDocuments } from './api/client'
+import { Document, Job, listDocuments, getJob } from './api/client'
 import { UploadZone } from './components/UploadZone'
 import { DocumentList } from './components/DocumentList'
-import { FactsPage } from './pages/FactsPage'
 import { RelationshipsPage } from './pages/RelationshipsPage'
 import { QueryPage } from './pages/QueryPage'
 
 interface DocEntry { doc: Document; job?: Job }
-type Tab = 'documents' | 'facts' | 'relationships' | 'query'
+type Tab = 'documents' | 'relationships' | 'query'
 
 const PHASES = [
   { n: 1, label: 'Document Intelligence', done: true },
-  { n: 2, label: 'Fact Extraction',       done: true },
-  { n: 3, label: 'ColBERT Indexing',      done: true },
-  { n: 4, label: 'Cross-Doc Comparison',  done: true },
+  { n: 2, label: 'Page Knowledge Graph',  done: true },
+  { n: 3, label: 'Vector Indexing',       done: true },
+  { n: 4, label: 'Cross-Doc Linking',     done: true },
   { n: 5, label: 'Query Interface',       done: false, active: true },
 ]
+
+const ACTIVE_STATUSES = new Set(['queued', 'processing', 'chunked', 'embedding', 'generating', 'linking'])
 
 export default function App() {
   const [entries, setEntries] = useState<DocEntry[]>([])
@@ -24,16 +25,33 @@ export default function App() {
   const pollRef               = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadDocuments = useCallback(async () => {
-    const docs = await listDocuments()
-    setEntries(prev => {
-      const jobMap = Object.fromEntries(prev.map(e => [e.doc.id, e.job]))
-      return docs.map(doc => ({ doc, job: jobMap[doc.id] }))
-    })
+    try {
+      const docs = await listDocuments()
+
+      // Fetch fresh job data for all non-done docs so progress survives page reload
+      const active = docs.filter(d => ACTIVE_STATUSES.has(d.status))
+      const jobResults = await Promise.allSettled(active.map(d => getJob(d.id)))
+      const freshJobs: Record<string, Job> = {}
+      active.forEach((d, i) => {
+        const r = jobResults[i]
+        if (r.status === 'fulfilled' && r.value) freshJobs[d.id] = r.value
+      })
+
+      setEntries(prev => {
+        const prevJobMap = Object.fromEntries(prev.map(e => [e.doc.id, e.job]))
+        return docs.map(doc => ({
+          doc,
+          job: freshJobs[doc.id] ?? prevJobMap[doc.id],
+        }))
+      })
+    } catch {
+      // silently ignore — retry on next interval
+    }
   }, [])
 
   useEffect(() => {
     loadDocuments()
-    pollRef.current = setInterval(loadDocuments, 5000)
+    pollRef.current = setInterval(loadDocuments, 4000)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [loadDocuments])
 
@@ -60,7 +78,6 @@ export default function App() {
 
   const TABS: { id: Tab; label: string }[] = [
     { id: 'documents',     label: 'Documents' },
-    { id: 'facts',         label: 'Facts' },
     { id: 'relationships', label: 'Relationships' },
     { id: 'query',         label: 'Query' },
   ]
@@ -152,14 +169,13 @@ export default function App() {
                     'Page type detection — text vs. scanned',
                     'Layout extraction with coordinates (pdfplumber)',
                     'OCR fallback for image pages (Tesseract)',
-                    'Deterministic table → natural language',
+                    'Vision pass for charts/infographics (Nova 2 Lite)',
                     'Multi-granularity chunking',
-                    'Amazon Nova 2 Lite fact extraction',
-                    'rapidfuzz evidence verification',
-                    'Domain-agnostic unit + time normalization',
+                    'Page Knowledge Graph — 1 LLM call per page',
                     'bge-large dense + BM25 sparse indexing',
                     'ColBERT multi-vector late interaction',
                     'Cross-document relationship classification',
+                    'Embedding similarity → CORROBORATES / CONTRADICTS / RECONCILES',
                   ].map((s, i) => (
                     <li key={i} className="flex items-start gap-2.5 text-xs text-body-muted">
                       <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-xs bg-stone font-mono text-[9px] font-semibold text-slate">
@@ -181,8 +197,6 @@ export default function App() {
               <DocumentList entries={entries} />
             </div>
           </div>
-        ) : tab === 'facts' ? (
-          <FactsPage documents={docs} />
         ) : tab === 'relationships' ? (
           <RelationshipsPage documents={docs} />
         ) : (

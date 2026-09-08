@@ -96,3 +96,53 @@ def get_llm(max_tokens: int = 5120) -> _BedrockChat:
 def get_llm_json(max_tokens: int = 5120) -> _BedrockChat:
     # JSON enforced via system prompt ("Return ONLY valid JSON: {...}")
     return _BedrockChat(max_tokens=max_tokens)
+
+
+_VISION_PROMPT = """\
+You are a chart and data extraction specialist analyzing a PDF slide or page image.
+
+Your task: extract EVERY number, label, and data point visible in charts, graphs, \
+tables, and infographics on this page.
+
+Output format — for each visual element:
+
+CHART: <title or description of the chart/visual>
+| Metric | Value | Unit | Period | Notes |
+|--------|-------|------|--------|-------|
+<one row per visible data point — bars, lines, pie slices, table cells, callout numbers>
+TREND: <one sentence describing direction or key takeaway>
+
+Rules:
+- Read bar heights, line points, pie percentages, axis labels, legend text, footnotes
+- Include both absolute values AND percentages when shown
+- If axis shows time (quarters, years) include it in the Period column
+- Repeat the CHART block for every distinct chart/table on the page
+- If no visual data exists on the page, output exactly: NO_VISUAL_DATA
+- Do NOT skip any number. If a value is approximate, prefix with ~
+"""
+
+
+def vision_extract_page(image_bytes: bytes, page_context: str = "") -> str:
+    """Send a rendered PDF page image to Nova Lite and extract structured chart data."""
+    prompt = _VISION_PROMPT
+    if page_context:
+        prompt += f"\n\nPage context (from PDF text layer): {page_context[:600]}"
+
+    content = [
+        {"image": {"format": "png", "source": {"bytes": image_bytes}}},
+        {"text": prompt},
+    ]
+    kwargs = dict(
+        modelId=INFERENCE_PROFILE,
+        messages=[{"role": "user", "content": content}],
+        inferenceConfig={"maxTokens": 2048},
+    )
+    try:
+        resp = _client().converse(**kwargs)
+        result = resp["output"]["message"]["content"][0]["text"].strip()
+        if result == "NO_VISUAL_DATA":
+            return ""
+        return result
+    except Exception as e:
+        logger.warning("Vision extraction failed: %s", e)
+        return ""

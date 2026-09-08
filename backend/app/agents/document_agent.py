@@ -144,34 +144,48 @@ async def persist_chunks_node(state: DocumentState) -> DocumentState:
             )
             await db.commit()
 
-        # Update document status and hand off to Phase 2
-        await _update_doc_status(state["doc_id"], "chunked")
+        # Two background tasks fire in parallel:
+        #   A) chunk embedding into doc_chunks Qdrant (fast, progress-silent)
+        #   B) page MD generation + cross-doc linking (drives job progress 75→100%)
+        await _update_doc_status(state["doc_id"], "embedding")
         await _update_job(
             state["job_id"],
-            status="done",
-            stage="done",
-            progress=100,
-            message=f"Phase 1 complete — {len(chunks)} chunks stored. Launching fact extraction…",
+            status="processing",
+            stage="generating",
+            progress=75,
+            message=f"Chunks stored — building page knowledge graph ({len(chunks)} chunks)…",
         )
-        logger.info("[%s] Phase 1 done: %d chunks persisted — firing Phase 2", state["doc_id"], len(chunks))
+        logger.info("[%s] Chunks persisted — launching page graph pipeline", state["doc_id"])
 
-        # Fire Phase 2 as a background asyncio task (non-blocking)
-        from app.agents.extraction_agent import run_extraction_pipeline
-        extraction_job_id = str(uuid.uuid4())
-        now = datetime.utcnow().isoformat()
-        async with aiosqlite.connect(settings.db_path) as db:
-            await db.execute(
-                """INSERT INTO jobs (id, doc_id, status, stage, progress, total_pages, message, created_at, updated_at)
-                   VALUES (?, ?, 'queued', 'pending', 0, ?, 'Fact extraction queued', ?, ?)""",
-                (extraction_job_id, state["doc_id"], state.get("total_pages", 0), now, now),
-            )
-            await db.commit()
-        asyncio.create_task(run_extraction_pipeline(state["doc_id"], extraction_job_id))
+        asyncio.create_task(_run_chunk_embedding_silent(state["doc_id"], chunks))
+        asyncio.create_task(_run_page_graph(state["doc_id"], state["job_id"], chunks))
 
-        return {**state, "stage": "done", "progress": 100}
+        return {**state, "stage": "generating", "progress": 75}
     except Exception as exc:
         logger.exception("Persist error for doc %s", state["doc_id"])
         return {**state, "error": str(exc)}
+
+
+async def _run_chunk_embedding_silent(doc_id: str, chunks):
+    """Background: embed raw chunks into Qdrant. No progress updates — page graph drives those."""
+    try:
+        from app.services.chunk_embedder import embed_and_index_chunks
+        indexed = await embed_and_index_chunks(doc_id, chunks)
+        logger.info("[%s] Chunk embedding complete: %d vectors", doc_id, indexed)
+    except Exception as exc:
+        logger.exception("[%s] Chunk embedding failed: %s", doc_id, exc)
+
+
+async def _run_page_graph(doc_id: str, job_id: str, chunks):
+    """Background: page MD generation → cross-doc linking → mark done."""
+    try:
+        from app.services.page_md_generator import run_page_graph_pipeline
+        await run_page_graph_pipeline(doc_id, job_id, chunks)
+    except Exception as exc:
+        logger.exception("[%s] Page graph pipeline failed: %s", doc_id, exc)
+        await _update_doc_status(doc_id, "failed", error_msg=str(exc))
+        await _update_job(job_id, status="failed", stage="failed",
+                          error_msg=str(exc), message=f"Page graph failed: {exc}")
 
 
 async def handle_error_node(state: DocumentState) -> DocumentState:

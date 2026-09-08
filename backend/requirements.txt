@@ -27,7 +27,7 @@ boto3>=1.35.0,<2
 aiosqlite==0.20.0
 qdrant-client==1.12.1
 
-# Embeddings (ONNX-based — no heavy torch needed)
+# Embeddings — small ONNX models, no torch (~130 MB dense + BM25)
 fastembed==0.4.2
 
 # Utilities

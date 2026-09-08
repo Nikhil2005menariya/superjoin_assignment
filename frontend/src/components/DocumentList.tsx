@@ -10,9 +10,9 @@ const STATUS_LABEL: Record<string, string> = {
   queued:     'Queued',
   processing: 'Parsing',
   chunked:    'Chunked',
-  extracting: 'Extracting',
   embedding:  'Indexing',
-  comparing:  'Comparing',
+  generating: 'Building KG',
+  linking:    'Cross-linking',
   done:       'Done',
   failed:     'Failed',
 }
@@ -21,9 +21,9 @@ const STATUS_DOT: Record<string, string> = {
   queued:     'bg-muted',
   processing: 'bg-action-blue animate-pulse',
   chunked:    'bg-action-blue animate-pulse',
-  extracting: 'bg-action-blue animate-pulse',
   embedding:  'bg-action-blue animate-pulse',
-  comparing:  'bg-action-blue animate-pulse',
+  generating: 'bg-action-blue animate-pulse',
+  linking:    'bg-action-blue animate-pulse',
   done:       'bg-deep-green',
   failed:     'bg-error-red',
 }

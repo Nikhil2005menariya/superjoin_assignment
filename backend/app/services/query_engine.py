@@ -1,164 +1,226 @@
 """
-Natural-language query engine — grounded in the verified fact knowledge layer.
+Page-augmented query engine.
 
-Flow:
-  1. Hybrid retrieval (BM25 + dense + ColBERT rerank) → top-K candidate facts
-  2. Load full fact rows from SQLite (with evidence quotes)
-  3. Build a Groq prompt: answer STRICTLY from the retrieved verified facts
-  4. Return structured response: answer + source_facts + confidence + caveat
+Retrieval flow:
+  1. Parallel: SQL keyword search on chunks + Qdrant hybrid chunk search
+  2. Collect top-k matched chunk passages (exact text that hit the query)
+  3. For each unique (doc_id, page_num) in the hits → look up md_path from page_summaries
+  4. Read page MD files → structured knowledge: Summary, Key Metrics, Key Facts, Visual Content
+  5. Single Amazon Nova 2 Lite synthesis using BOTH matched passages + full page knowledge
 
-The system never answers from Groq's parametric knowledge — only from facts
-that have been extracted, evidence-verified, and indexed from uploaded documents.
-This makes every answer fully traceable to source text.
+This gives the LLM:
+  - Precision: the exact chunk text that semantically matched the query
+  - Breadth:   the full structured knowledge of every page that was hit (metrics tables,
+               visual data from charts, entity lists, cross-doc relationships)
 """
 
 import asyncio
-import json
 import logging
+from pathlib import Path
 from typing import Optional
 
 import aiosqlite
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import get_settings
-from app.services.retriever import hybrid_search
+from app.services.retriever import chunk_search
+from app.services.sql_agent import sql_search
 from app.services.llm_client import get_llm
 
 logger   = logging.getLogger(__name__)
 settings = get_settings()
 
-MAX_FACTS   = 12   # facts sent to Groq in context
+MAX_CHUNK_HITS  = 8   # top-k semantic chunks
+MAX_MD_PAGES    = 6   # max page MD files to read (expanded from chunk hits)
+MAX_MD_CHARS    = 2500  # cap per MD file to stay within token budget
 
-SYSTEM_PROMPT = """You are a precise, grounded answer engine for a Fact Knowledge Layer.
+_SYSTEM = """You are a precise, grounded answer engine for a document Fact Knowledge Layer.
 
-Rules you MUST follow:
-1. Answer ONLY using the verified facts provided below. Do not use external knowledge.
-2. If the facts do not contain enough information to fully answer the question, say so clearly.
-3. Be concise. 2–4 sentences unless the question demands more detail.
-4. Where relevant, mention the source period, entity, or scope of the fact.
-5. If facts from different documents disagree, explicitly note the discrepancy.
-6. Never invent numbers, dates, or claims not present in the facts.
+You receive two tiers of evidence for every question:
 
-At the end of your answer, on a new line starting with "CONFIDENCE:", rate your confidence
-in the answer as HIGH, MEDIUM, or LOW based on how well the retrieved facts answer the question."""
+[A] MATCHED PASSAGES — exact text excerpts from the document that semantically matched the query.
+    These are the most directly relevant pieces of text to your answer.
 
-_FACT_DETAIL_KEYS = [
-    "id", "doc_id", "statement", "subject", "predicate",
-    "value_raw", "unit_raw", "unit_canonical",
-    "time_period_raw", "time_start", "time_end", "scope",
-    "qualifier", "fact_type", "confidence",
-    "evidence_verified", "exact_quote",
-]
+[B] PAGE KNOWLEDGE FILES — structured knowledge extracted from the pages containing those passages.
+    Each file has: Summary, Key Metrics (table of all numbers on the page), Key Facts,
+    Visual Content (charts/graphs), and Entity Mentions.
+    Use these for precise figures, chart data, and comprehensive context.
+
+Rules:
+1. Answer ONLY from the provided evidence. Never use external knowledge.
+2. For specific numeric claims, prefer values from the Key Metrics tables in [B] — they are
+   extracted from both text AND visual content (charts, infographics).
+3. If the same metric appears across multiple pages with different values, flag the discrepancy
+   and note whether it is explained by different time periods, scopes, or units.
+4. For trend/causal questions, use the Summary and Key Facts sections in [B].
+5. For chart/graph data questions, use the Visual Content sections in [B].
+6. If evidence conflicts across documents, state both values with their sources.
+7. If the answer is not in any evidence, say so clearly — never guess.
+8. Cite sources: "(Page N, doc:XXXXXXXX)"
+
+End your answer with: CONFIDENCE: HIGH | MEDIUM | LOW"""
 
 
-async def _load_facts_by_ids(fact_ids: list[str]) -> list[dict]:
-    if not fact_ids:
-        return []
-    placeholders = ",".join("?" * len(fact_ids))
+def _read_md(path: str) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+
+async def _get_md_paths_for_pages(page_keys: list[tuple[str, int]]) -> dict[tuple[str, int], str]:
+    """Look up md_path from page_summaries for a list of (doc_id, page_num) tuples."""
+    if not page_keys:
+        return {}
     async with aiosqlite.connect(settings.db_path) as db:
-        async with db.execute(
-            f"SELECT {','.join(_FACT_DETAIL_KEYS)} FROM facts "
-            f"WHERE id IN ({placeholders}) AND evidence_verified = 1 "
-            f"ORDER BY confidence DESC",
-            fact_ids,
-        ) as cur:
-            rows = await cur.fetchall()
-    return [dict(zip(_FACT_DETAIL_KEYS, r)) for r in rows]
+        result = {}
+        for doc_id, page_num in page_keys:
+            async with db.execute(
+                "SELECT md_path FROM page_summaries WHERE doc_id=? AND page_num=?",
+                (doc_id, page_num),
+            ) as cur:
+                row = await cur.fetchone()
+            if row and row[0]:
+                result[(doc_id, page_num)] = row[0]
+        return result
 
 
-def _build_facts_context(facts: list[dict]) -> str:
-    lines = []
-    for i, f in enumerate(facts, 1):
-        parts = [f"[{i}] {f['statement']}"]
-        if f.get("exact_quote"):
-            parts.append(f'    Source quote: "{f["exact_quote"]}"')
-        meta = []
-        if f.get("time_period_raw"):
-            meta.append(f"period: {f['time_period_raw']}")
-        if f.get("scope"):
-            meta.append(f"scope: {f['scope']}")
-        if meta:
-            parts.append(f"    ({', '.join(meta)})")
-        lines.append("\n".join(parts))
-    return "\n\n".join(lines)
+def _dedup_chunks(chunks: list[dict]) -> list[dict]:
+    seen, out = set(), []
+    for c in chunks:
+        key = (c.get("text") or "")[:100].strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(c)
+    return out
+
+
+def _build_context(chunk_hits: list[dict], md_contents: list[tuple[str, int, str]]) -> str:
+    parts = []
+
+    if chunk_hits:
+        parts.append("=== [A] MATCHED PASSAGES ===")
+        for i, c in enumerate(chunk_hits, 1):
+            doc_tag = f"doc:{str(c.get('doc_id',''))[:8]}"
+            loc = f"Page {c.get('page_num','?')} ({doc_tag})"
+            if c.get("section_path"):
+                loc += f" — {c['section_path'][:50]}"
+            if "vision" in str(c.get("source_type", "")):
+                loc += " [VISUAL]"
+            parts.append(f"[A{i}] {loc}\n{str(c.get('text',''))[:500]}")
+
+    if md_contents:
+        parts.append("\n=== [B] PAGE KNOWLEDGE FILES ===")
+        for doc_id, page_num, content in md_contents:
+            doc_tag = f"doc:{doc_id[:8]}"
+            parts.append(f"--- Page {page_num} ({doc_tag}) ---\n{content[:MAX_MD_CHARS]}")
+
+    return "\n\n".join(parts)
 
 
 async def answer_query(
     question: str,
     doc_id: Optional[str] = None,
-    limit: int = MAX_FACTS,
+    limit: int = MAX_CHUNK_HITS,
 ) -> dict:
-    """
-    Answer a natural-language question using only retrieved, verified facts.
-    Returns:
-      answer         — synthesized text response
-      source_facts   — list of fact dicts used to ground the answer
-      confidence     — HIGH | MEDIUM | LOW (Groq self-assessment)
-      retrieval_meta — info about how many candidates were found
-      caveat         — if facts are insufficient, a note about coverage gaps
-    """
-    # ── Stage 1: hybrid retrieval ─────────────────────────────────────────────
-    hits = await hybrid_search(query=question, doc_id=doc_id, limit=limit)
-    fact_ids = [h["fact_id"] for h in hits if h.get("fact_id")]
-
-    # ── Stage 2: load full facts from SQLite ──────────────────────────────────
-    source_facts = await _load_facts_by_ids(fact_ids)
-
-    if not source_facts:
-        return {
-            "answer":         "No verified facts were found for this query in the uploaded documents.",
-            "source_facts":   [],
-            "confidence":     "LOW",
-            "retrieval_meta": {"hits": 0, "method": hits[0].get("retrieval") if hits else "none"},
-            "caveat":         "Upload and process relevant documents first.",
-        }
-
-    # ── Stage 3: Groq synthesis ───────────────────────────────────────────────
-    facts_context = _build_facts_context(source_facts)
-    user_msg      = (
-        f"Verified facts from the knowledge base ({len(source_facts)} facts):\n\n"
-        f"{facts_context}\n\n"
-        f"Question: {question}"
+    # ── Step 1: parallel retrieval ────────────────────────────────────────────
+    sql_result, chunk_hits = await asyncio.gather(
+        sql_search(question, doc_id),
+        chunk_search(query=question, doc_id=doc_id, limit=limit),
     )
 
-    llm = get_llm()
+    # Merge and dedup chunk hits
+    sql_chunk_hits = [
+        {"text": c["raw_text"], "page_num": c.get("page_num"),
+         "section_path": c.get("section_path"), "doc_id": c.get("doc_id"),
+         "source_type": "sql", "level": c.get("level")}
+        for c in sql_result.get("chunks", [])
+    ]
+    all_chunks = _dedup_chunks(chunk_hits + sql_chunk_hits)[:MAX_CHUNK_HITS]
 
-    try:
-        resp   = await llm.ainvoke([
-            SystemMessage(content=SYSTEM_PROMPT),
-            HumanMessage(content=user_msg),
-        ])
-        raw    = resp.content.strip()
+    # ── Step 2: collect MD paths — from chunk payload first, SQLite as fallback ─
+    direct_md_paths: dict[tuple[str, int], str] = {}
+    seen_pages_no_md: list[tuple[str, int]] = []
 
-        # Extract confidence tag
-        confidence = "MEDIUM"
-        answer     = raw
-        for line in raw.splitlines():
-            if line.upper().startswith("CONFIDENCE:"):
-                tag = line.split(":", 1)[1].strip().upper()
-                if tag in ("HIGH", "MEDIUM", "LOW"):
-                    confidence = tag
-                answer = raw[: raw.rfind(line)].strip()
-                break
+    for c in all_chunks:
+        d = c.get("doc_id") or doc_id or ""
+        p = c.get("page_num") or 0
+        if not (d and p):
+            continue
+        mp = c.get("md_path")
+        if mp:
+            direct_md_paths[(d, p)] = mp
+        else:
+            seen_pages_no_md.append((d, p))
 
-    except Exception as e:
-        logger.error("Groq synthesis failed: %s", e)
+    # SQLite fallback for chunks that don't have md_path in payload yet
+    fallback = await _get_md_paths_for_pages(seen_pages_no_md[:MAX_MD_PAGES])
+
+    md_path_map = {**direct_md_paths, **fallback}
+
+    # ── Step 4: read MD files ─────────────────────────────────────────────────
+    md_contents: list[tuple[str, int, str]] = []
+    for (d, p), mp in md_path_map.items():
+        content = _read_md(mp)
+        if content:
+            md_contents.append((d, p, content))
+    md_contents.sort(key=lambda x: x[1])  # sort by page number
+
+    # ── No evidence at all ────────────────────────────────────────────────────
+    if not all_chunks and not md_contents:
         return {
-            "answer":       "Synthesis failed — the retrieved facts are listed below.",
-            "source_facts": source_facts,
-            "confidence":   "LOW",
-            "retrieval_meta": {"hits": len(hits), "method": hits[0].get("retrieval") if hits else "none"},
-            "caveat":       str(e),
+            "answer": "No relevant content found for this query. Upload and process documents first.",
+            "source_facts": [],
+            "confidence": "LOW",
+            "retrieval_meta": {
+                "hits": 0, "md_files": 0, "chunks": 0, "method": "page_augmented"
+            },
+            "caveat": "No documents have been processed yet.",
         }
 
+    # ── Step 5: build context + single LLM call ───────────────────────────────
+    context = _build_context(all_chunks, md_contents)
+    user_msg = f"Evidence from the knowledge base:\n\n{context}\n\nQuestion: {question}"
+
+    llm = get_llm()
+    try:
+        resp = await llm.ainvoke([
+            SystemMessage(content=_SYSTEM),
+            HumanMessage(content=user_msg),
+        ])
+        raw = resp.content.strip()
+    except Exception as exc:
+        logger.error("LLM synthesis failed: %s", exc)
+        return {
+            "answer": "Synthesis failed — please retry.",
+            "source_facts": [],
+            "confidence": "LOW",
+            "retrieval_meta": {
+                "hits": len(all_chunks), "md_files": len(md_contents),
+                "chunks": len(all_chunks), "method": "page_augmented"
+            },
+            "caveat": str(exc),
+        }
+
+    confidence = "MEDIUM"
+    answer = raw
+    for line in reversed(raw.splitlines()):
+        if line.upper().startswith("CONFIDENCE:"):
+            tag = line.split(":", 1)[1].strip().upper()
+            if tag in ("HIGH", "MEDIUM", "LOW"):
+                confidence = tag
+            answer = raw[: raw.rfind(line)].strip()
+            break
+
     return {
-        "answer":         answer,
-        "source_facts":   source_facts,
-        "confidence":     confidence,
+        "answer":       answer,
+        "source_facts": [],
+        "confidence":   confidence,
         "retrieval_meta": {
-            "hits":   len(hits),
-            "used":   len(source_facts),
-            "method": hits[0].get("retrieval") if hits else "none",
+            "hits":     len(all_chunks),
+            "md_files": len(md_contents),
+            "chunks":   len(all_chunks),
+            "method":   "page_augmented",
         },
         "caveat": None,
     }

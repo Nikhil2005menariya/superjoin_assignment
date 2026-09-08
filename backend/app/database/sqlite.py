@@ -47,7 +47,32 @@ CREATE TABLE IF NOT EXISTS chunks (
     bbox         TEXT DEFAULT '[]',
     source_type  TEXT DEFAULT 'text',
     chunk_index  INTEGER DEFAULT 0,
+    md_path      TEXT,
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS page_summaries (
+    id          TEXT PRIMARY KEY,
+    doc_id      TEXT NOT NULL REFERENCES documents(id),
+    page_num    INTEGER NOT NULL,
+    md_path     TEXT NOT NULL,
+    md_content  TEXT,
+    summary     TEXT,
+    has_visual  INTEGER DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(doc_id, page_num)
+);
+
+CREATE TABLE IF NOT EXISTS page_relationships (
+    id          TEXT PRIMARY KEY,
+    page_a_id   TEXT REFERENCES page_summaries(id),
+    page_b_id   TEXT REFERENCES page_summaries(id),
+    doc_a_id    TEXT REFERENCES documents(id),
+    doc_b_id    TEXT REFERENCES documents(id),
+    type        TEXT NOT NULL,
+    explanation TEXT,
+    confidence  REAL DEFAULT 0.5,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS facts (
@@ -104,16 +129,26 @@ CREATE TABLE IF NOT EXISTS relationships (
     created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_chunks_doc       ON chunks(doc_id);
-CREATE INDEX IF NOT EXISTS idx_chunks_level     ON chunks(level);
-CREATE INDEX IF NOT EXISTS idx_facts_doc        ON facts(doc_id);
-CREATE INDEX IF NOT EXISTS idx_facts_subject    ON facts(subject);
-CREATE INDEX IF NOT EXISTS idx_facts_verified   ON facts(evidence_verified);
-CREATE INDEX IF NOT EXISTS idx_relationships_a  ON relationships(fact_a_id);
-CREATE INDEX IF NOT EXISTS idx_relationships_b  ON relationships(fact_b_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_doc        ON chunks(doc_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_level      ON chunks(level);
+CREATE INDEX IF NOT EXISTS idx_chunks_page       ON chunks(page_num);
+CREATE INDEX IF NOT EXISTS idx_facts_doc         ON facts(doc_id);
+CREATE INDEX IF NOT EXISTS idx_facts_subject     ON facts(subject);
+CREATE INDEX IF NOT EXISTS idx_facts_verified    ON facts(evidence_verified);
+CREATE INDEX IF NOT EXISTS idx_relationships_a   ON relationships(fact_a_id);
+CREATE INDEX IF NOT EXISTS idx_relationships_b   ON relationships(fact_b_id);
 CREATE INDEX IF NOT EXISTS idx_relationships_type ON relationships(type);
-CREATE INDEX IF NOT EXISTS idx_jobs_doc         ON jobs(doc_id);
+CREATE INDEX IF NOT EXISTS idx_page_summaries_doc ON page_summaries(doc_id);
+CREATE INDEX IF NOT EXISTS idx_page_rel_a        ON page_relationships(page_a_id);
+CREATE INDEX IF NOT EXISTS idx_page_rel_b        ON page_relationships(page_b_id);
+CREATE INDEX IF NOT EXISTS idx_page_rel_type     ON page_relationships(type);
+CREATE INDEX IF NOT EXISTS idx_jobs_doc          ON jobs(doc_id);
 """
+
+# Migrations for existing DBs that predate new columns
+_MIGRATIONS = [
+    "ALTER TABLE chunks ADD COLUMN md_path TEXT",
+]
 
 
 async def init_db():
@@ -121,6 +156,11 @@ async def init_db():
     os.makedirs(settings.data_dir, exist_ok=True)
     async with aiosqlite.connect(settings.db_path) as db:
         await db.executescript(SCHEMA)
+        for migration in _MIGRATIONS:
+            try:
+                await db.execute(migration)
+            except Exception:
+                pass  # column already exists
         await db.commit()
     logger.info("SQLite database initialized at %s", settings.db_path)
 
