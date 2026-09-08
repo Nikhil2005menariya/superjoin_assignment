@@ -144,9 +144,8 @@ async def persist_chunks_node(state: DocumentState) -> DocumentState:
             )
             await db.commit()
 
-        # Two background tasks fire in parallel:
-        #   A) chunk embedding into doc_chunks Qdrant (fast, progress-silent)
-        #   B) page MD generation + cross-doc linking (drives job progress 75→100%)
+        # Run embedding first (local ONNX, no Bedrock), then page graph sequentially.
+        # Running both in parallel caused OOM on 4 GB instances.
         await _update_doc_status(state["doc_id"], "embedding")
         await _update_job(
             state["job_id"],
@@ -157,8 +156,7 @@ async def persist_chunks_node(state: DocumentState) -> DocumentState:
         )
         logger.info("[%s] Chunks persisted — launching page graph pipeline", state["doc_id"])
 
-        asyncio.create_task(_run_chunk_embedding_silent(state["doc_id"], chunks))
-        asyncio.create_task(_run_page_graph(state["doc_id"], state["job_id"], chunks))
+        asyncio.create_task(_run_embedding_then_page_graph(state["doc_id"], state["job_id"], chunks))
 
         return {**state, "stage": "generating", "progress": 75}
     except Exception as exc:
@@ -174,6 +172,12 @@ async def _run_chunk_embedding_silent(doc_id: str, chunks):
         logger.info("[%s] Chunk embedding complete: %d vectors", doc_id, indexed)
     except Exception as exc:
         logger.exception("[%s] Chunk embedding failed: %s", doc_id, exc)
+
+
+async def _run_embedding_then_page_graph(doc_id: str, job_id: str, chunks):
+    """Background: embed chunks first (local, no Bedrock), then run page graph. Sequential to avoid OOM."""
+    await _run_chunk_embedding_silent(doc_id, chunks)
+    await _run_page_graph(doc_id, job_id, chunks)
 
 
 async def _run_page_graph(doc_id: str, job_id: str, chunks):

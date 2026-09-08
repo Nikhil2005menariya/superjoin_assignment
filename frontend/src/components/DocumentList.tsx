@@ -115,7 +115,10 @@ export function DocumentList({ entries, onAskNow }: Props) {
     <ul className="space-y-2">
       {entries.map(({ doc, job }) => {
         const isExpanded = expanded === doc.id
-        const status     = job?.status ?? doc.status
+        // doc.status is authoritative for terminal states — job can lag behind polling
+        const status     = (doc.status === 'done' || doc.status === 'failed')
+          ? doc.status
+          : (job?.status ?? doc.status)
         const isDone     = status === 'done'
         const isFailed   = status === 'failed'
         const isActive   = !isDone && !isFailed

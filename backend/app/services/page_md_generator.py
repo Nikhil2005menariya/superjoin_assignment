@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 _llm = _BedrockChat()
+_bedrock_sem = asyncio.Semaphore(2)  # max 2 concurrent Bedrock calls to avoid OOM on 4 GB instance
 
 MAX_PAGE_CHARS = 5000
 
@@ -188,10 +189,11 @@ async def generate_page_md(
     user_msg = f"Document page {page_num}:\n\n{trimmed}"
 
     try:
-        resp = await _llm.ainvoke([
-            SystemMessage(content=_SYSTEM),
-            HumanMessage(content=user_msg),
-        ])
+        async with _bedrock_sem:
+            resp = await _llm.ainvoke([
+                SystemMessage(content=_SYSTEM),
+                HumanMessage(content=user_msg),
+            ])
         md_body = resp.content.strip()
     except Exception as exc:
         logger.warning("[%s] LLM failed for page %d: %s", doc_id, page_num, exc)

@@ -38,6 +38,13 @@ export default function App() {
           job: freshJobs[doc.id] ?? prevJobMap[doc.id],
         }))
       })
+
+      // Stop polling once everything is terminal
+      const allDone = docs.every(d => d.status === 'done' || d.status === 'failed')
+      if (allDone && pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
     } catch {
       // silently ignore — retry on next interval
     }
@@ -57,7 +64,11 @@ export default function App() {
         created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       },
     }, ...prev])
-  }, [])
+    // Restart polling if it was stopped (all-done state)
+    if (!pollRef.current) {
+      pollRef.current = setInterval(loadDocuments, 4000)
+    }
+  }, [loadDocuments])
 
   const handleJobUpdate = useCallback((docId: string, job: Job) => {
     setEntries(prev => prev.map(e =>
