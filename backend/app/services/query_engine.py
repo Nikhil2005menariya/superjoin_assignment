@@ -212,9 +212,22 @@ async def answer_query(
             answer = raw[: raw.rfind(line)].strip()
             break
 
+    source_passages = [
+        {
+            "text":         str(c.get("text", ""))[:600],
+            "page_num":     c.get("page_num"),
+            "doc_id":       c.get("doc_id"),
+            "section_path": c.get("section_path"),
+            "source_type":  c.get("source_type"),
+            "score":        c.get("score"),
+        }
+        for c in all_chunks[:8]
+        if c.get("text")
+    ]
+
     return {
         "answer":       answer,
-        "source_facts": [],
+        "source_facts": source_passages,
         "confidence":   confidence,
         "retrieval_meta": {
             "hits":     len(all_chunks),
