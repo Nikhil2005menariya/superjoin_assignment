@@ -1,4 +1,20 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState, Component, ErrorInfo, ReactNode } from 'react'
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null }
+  static getDerivedStateFromError(error: Error) { return { error } }
+  componentDidCatch(error: Error, info: ErrorInfo) { console.error('UI crash:', error, info) }
+  render() {
+    if (this.state.error) return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4 px-6 text-center">
+        <p className="text-sm font-medium text-ink">Something went wrong rendering this section.</p>
+        <p className="text-xs text-muted font-mono">{(this.state.error as Error).message}</p>
+        <button onClick={() => this.setState({ error: null })} className="text-xs text-action-blue underline">Try again</button>
+      </div>
+    )
+    return this.props.children
+  }
+}
 import clsx from 'clsx'
 import { Document, Job, listDocuments, getJob } from './api/client'
 import { UploadZone } from './components/UploadZone'
@@ -141,6 +157,7 @@ export default function App() {
 
       {/* Main */}
       <main className="mx-auto max-w-6xl px-6 py-10">
+        <ErrorBoundary>
         {tab === 'documents' ? (
           <div className="space-y-6">
 
@@ -246,6 +263,7 @@ export default function App() {
         ) : (
           <AboutCreatorPage />
         )}
+        </ErrorBoundary>
       </main>
     </div>
   )

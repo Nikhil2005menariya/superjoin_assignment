@@ -107,13 +107,13 @@ function SourcePanel({ chunks, documents }: { chunks: SourceChunk[]; documents: 
                 {c.section_path && (
                   <span className="font-mono text-[9px] text-muted truncate">{c.section_path}</span>
                 )}
-                {c.score !== undefined && (
+                {c.score != null && (
                   <span className="ml-auto font-mono text-[9px] text-muted">
-                    score {c.score.toFixed(3)}
+                    score {Number(c.score).toFixed(3)}
                   </span>
                 )}
               </div>
-              <p className="text-xs text-body-muted leading-relaxed line-clamp-4">{c.text}</p>
+              <p className="text-xs text-body-muted leading-relaxed line-clamp-4">{c.text ?? ''}</p>
             </div>
           ))}
         </div>
