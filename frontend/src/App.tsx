@@ -73,7 +73,7 @@ export default function App() {
   const TABS: { id: Tab; label: string }[] = [
     { id: 'documents',     label: 'Documents' },
     { id: 'relationships', label: 'Relationships' },
-    { id: 'query',         label: 'Query' },
+    { id: 'query',         label: 'Ask' },
     { id: 'project',       label: 'About Project' },
     { id: 'creator',       label: 'About Creator' },
   ]
@@ -131,47 +131,99 @@ export default function App() {
       {/* Main */}
       <main className="mx-auto max-w-6xl px-6 py-10">
         {tab === 'documents' ? (
-          <div className="grid gap-10 lg:grid-cols-5">
-            <div className="lg:col-span-2">
-              <SectionLabel>Upload</SectionLabel>
-              <UploadZone
-                onUploadStart={handleUploadStart}
-                onJobUpdate={handleJobUpdate}
-                onUploadDone={handleUploadDone}
-              />
-              <div className="mt-6">
-                <SectionLabel>Pipeline</SectionLabel>
-                <ol className="mt-3 space-y-2">
-                  {[
-                    'Page type detection — text vs. scanned',
-                    'Layout extraction with coordinates (pdfplumber)',
-                    'OCR fallback for image pages (Tesseract)',
-                    'Vision pass for charts/infographics (Nova 2 Lite)',
-                    'Multi-granularity chunking',
-                    'Page Knowledge Graph — 1 LLM call per page',
-                    'bge-large dense + BM25 sparse indexing',
-                    'ColBERT multi-vector late interaction',
-                    'Cross-document relationship classification',
-                    'Embedding similarity → CORROBORATES / CONTRADICTS / RECONCILES',
-                  ].map((s, i) => (
-                    <li key={i} className="flex items-start gap-2.5 text-xs text-body-muted">
-                      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-xs bg-stone font-mono text-[9px] font-semibold text-slate">
-                        {i + 1}
-                      </span>
-                      {s}
-                    </li>
-                  ))}
-                </ol>
+          <div className="space-y-6">
+
+            {/* Page header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-xl font-semibold tracking-tight text-ink">Documents</h1>
+                <p className="mt-0.5 text-sm text-muted">
+                  {entries.length === 0
+                    ? 'Upload a PDF to begin'
+                    : `${entries.filter(e => e.doc.status === 'done').length} of ${entries.length} ready`}
+                </p>
               </div>
+              <button
+                onClick={() => setTab('query')}
+                disabled={entries.filter(e => e.doc.status === 'done').length === 0}
+                className={clsx(
+                  'flex items-center gap-2 rounded-sm px-4 py-2 text-sm font-medium transition-colors',
+                  entries.filter(e => e.doc.status === 'done').length > 0
+                    ? 'bg-ink text-canvas hover:bg-ink/90'
+                    : 'bg-stone text-muted cursor-not-allowed',
+                )}
+              >
+                Ask now
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M3 7h8M7 3l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
             </div>
-            <div className="lg:col-span-3">
-              <div className="mb-4 flex items-center justify-between">
-                <SectionLabel>Documents ({entries.length})</SectionLabel>
-                <button onClick={loadDocuments} className="text-xs text-muted hover:text-ink underline underline-offset-2">
-                  Refresh
-                </button>
+
+            <div className="grid gap-6 lg:grid-cols-5">
+
+              {/* Left — upload + pipeline */}
+              <div className="space-y-4 lg:col-span-2">
+
+                {/* Upload zone */}
+                <UploadZone
+                  onUploadStart={handleUploadStart}
+                  onJobUpdate={handleJobUpdate}
+                  onUploadDone={handleUploadDone}
+                />
+
+                {/* Ingestion time hint */}
+                <div className="flex items-start gap-2.5 rounded-xs border border-hairline bg-stone/50 px-3.5 py-3">
+                  <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted" viewBox="0 0 16 16" fill="none">
+                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.2"/>
+                    <path d="M8 5v3.5l2 1.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                  </svg>
+                  <p className="text-xs text-muted leading-relaxed">
+                    A 100-page PDF takes ~20 minutes to fully ingest — the system builds a knowledge file per page with vision extraction.
+                    You can query <span className="text-slate font-medium">pre-ingested documents</span> immediately.
+                  </p>
+                </div>
+
+                {/* Pipeline steps */}
+                <div className="rounded-sm border border-hairline bg-canvas p-4">
+                  <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-muted">Ingestion pipeline</p>
+                  <ol className="space-y-2.5">
+                    {[
+                      ['Text extraction', 'pdfplumber + PyMuPDF per page'],
+                      ['OCR fallback',    'Tesseract for scanned pages'],
+                      ['Vision pass',     'Charts & tables via Nova 2 Lite'],
+                      ['Chunking',        'Multi-granularity text splits'],
+                      ['Page Knowledge Graph', '1 LLM call → structured .md per page'],
+                      ['Hybrid indexing', 'bge-small dense + BM25 sparse → Qdrant'],
+                      ['Cross-doc linking', 'Embedding similarity, zero LLM calls'],
+                    ].map(([label, detail], i) => (
+                      <li key={i} className="flex items-start gap-2.5">
+                        <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-xs bg-stone font-mono text-[9px] font-semibold text-slate">
+                          {i + 1}
+                        </span>
+                        <div>
+                          <span className="text-xs font-medium text-ink">{label}</span>
+                          <span className="text-xs text-muted"> — {detail}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
               </div>
-              <DocumentList entries={entries} />
+
+              {/* Right — document list */}
+              <div className="lg:col-span-3">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-muted">
+                    {entries.length > 0 ? `${entries.length} document${entries.length > 1 ? 's' : ''}` : 'No documents yet'}
+                  </p>
+                  <button onClick={loadDocuments} className="text-xs text-muted hover:text-ink transition-colors">
+                    Refresh
+                  </button>
+                </div>
+                <DocumentList entries={entries} onAskNow={() => setTab('query')} />
+              </div>
+
             </div>
           </div>
         ) : tab === 'relationships' ? (

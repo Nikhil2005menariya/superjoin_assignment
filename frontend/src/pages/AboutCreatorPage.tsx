@@ -219,11 +219,6 @@ export function AboutCreatorPage() {
               chips: ['React.js', 'Next.js', 'Tailwind CSS', 'Vite'],
             },
             {
-              category: 'Finance-Adjacent',
-              icon: Award,
-              chips: ['GST', 'Income Tax', 'TDS', 'ROC', 'Data Validation & Reconciliation', 'Financial Compliance'],
-            },
-            {
               category: 'Cloud & Infrastructure',
               icon: GitBranch,
               chips: ['AWS Lightsail', 'Docker', 'CI/CD', 'Git', 'PM2', 'Vercel', 'S3', 'Amplify', 'API Gateway'],
@@ -248,6 +243,68 @@ export function AboutCreatorPage() {
       <div>
         <h2 className="mb-5 text-xl font-semibold tracking-tight text-ink">Experience</h2>
         <div className="space-y-3">
+
+          <ExpandableCard
+            badge="Internship"
+            title="Hypercaller (Leknology Labs Pvt. Ltd.)"
+            subtitle="AI Engineering Intern — Agent Orchestration"
+            period="May 2026 – Aug 2026"
+            location="Remote"
+            summary="Built AI agents in Python (LangGraph) that reason over a domain-specific Knowledge Graph, combining prompting and tool use to resolve queries. Integrated voice AI, background processing, and a human-in-the-loop feedback system."
+            tags={['Python', 'LangGraph', 'LangChain', 'Knowledge Graph', 'Deepgram', 'Kokoro TTS', 'Celery', 'Redis', 'Docker', 'AWS']}
+            sections={[
+              {
+                label: 'What is Hypercaller?',
+                content: <p>An AI sales platform and multi-tenant CRM where AI agents understand a company's products and interact with customers using company-specific knowledge — grounded in a domain Knowledge Graph, not the LLM's general training data.</p>,
+              },
+              {
+                label: 'Data ingestion & Knowledge Graph',
+                content: (
+                  <BulletList items={[
+                    'Built a crawler/ingestion pipeline: Raw Data → Extraction → Entity Identification → Relationship Mapping → Deduplication → Knowledge Graph.',
+                    'The graph captures Company → Product → Feature relationships, enabling the agent to recommend the right product for each customer need.',
+                    'Applied entity extraction, relationship mapping, and deduplication standards to keep the system grounded and reliable.',
+                  ]} />
+                ),
+              },
+              {
+                label: 'LangGraph agent architecture',
+                content: (
+                  <div>
+                    <p className="mb-2">Used LangGraph because the workflow is a graph, not a linear chain: User → Agent → Understand Intent → Retrieve Information → Use Tools → Reason → Generate Response. Different nodes execute depending on the situation.</p>
+                    <BulletList items={[
+                      'Wired in Deepgram STT and Kokoro TTS so agents handle real voice input — closing the loop from raw audio signal to spoken response.',
+                      'Integrated tool use so the agent can call Knowledge Graph queries, product lookup tools, and external APIs mid-conversation.',
+                    ]} />
+                  </div>
+                ),
+              },
+              {
+                label: 'Human-in-the-loop feedback system',
+                content: (
+                  <div>
+                    <p className="mb-2">Built a feedback loop to catch agent errors that "sound correct" — the hardest class of LLM failures:</p>
+                    <BulletList items={[
+                      'Logged full conversation transcripts, retrieved vector chunks, products surfaced, and KG context for each interaction.',
+                      'A human reviewer provides natural-language feedback (e.g. "Should have recommended Product A, not B, because the customer is a small business").',
+                      'A feedback agent processes the feedback and updates the relevant knowledge — not just as a comment, but as re-embeddable corrections that improve future retrieval.',
+                      'Outcome: actual production failures become corrections to the system\'s knowledge base.',
+                    ]} />
+                  </div>
+                ),
+              },
+              {
+                label: 'Background processing',
+                content: (
+                  <BulletList items={[
+                    'Crawling and processing pipelines run as background jobs via Celery workers backed by Redis queues — preventing long-running tasks from blocking API requests.',
+                    'Redis also used for caching and supporting the async architecture.',
+                    'Deployed services via Docker on AWS Lightsail Container Service, API Gateway, and S3.',
+                  ]} />
+                ),
+              },
+            ]}
+          />
 
           <ExpandableCard
             badge="Internship"
@@ -318,68 +375,6 @@ Node.js + TypeScript REST API  (AWS Lightsail + PM2)
                 label: 'Key outcome',
                 content: (
                   <p>Platform is live with real paying clients. Owning this end-to-end taught me that building a feature is a small fraction of the work — the rest is RBAC design, payment reliability, background job failure handling, audit trails, and keeping the system consistent under concurrent real-world usage.</p>
-                ),
-              },
-            ]}
-          />
-
-          <ExpandableCard
-            badge="Internship"
-            title="Hypercaller (Leknology Labs Pvt. Ltd.)"
-            subtitle="AI Engineering Intern — Agent Orchestration"
-            period="May 2026 – Aug 2026"
-            location="Remote"
-            summary="Built AI agents in Python (LangGraph) that reason over a domain-specific Knowledge Graph, combining prompting and tool use to resolve queries. Integrated voice AI, background processing, and a human-in-the-loop feedback system."
-            tags={['Python', 'LangGraph', 'LangChain', 'Knowledge Graph', 'Deepgram', 'Kokoro TTS', 'Celery', 'Redis', 'Docker', 'AWS']}
-            sections={[
-              {
-                label: 'What is Hypercaller?',
-                content: <p>An AI sales platform and multi-tenant CRM where AI agents understand a company's products and interact with customers using company-specific knowledge — grounded in a domain Knowledge Graph, not the LLM's general training data.</p>,
-              },
-              {
-                label: 'Data ingestion & Knowledge Graph',
-                content: (
-                  <BulletList items={[
-                    'Built a crawler/ingestion pipeline: Raw Data → Extraction → Entity Identification → Relationship Mapping → Deduplication → Knowledge Graph.',
-                    'The graph captures Company → Product → Feature relationships, enabling the agent to recommend the right product for each customer need.',
-                    'Applied entity extraction, relationship mapping, and deduplication standards to keep the system grounded and reliable.',
-                  ]} />
-                ),
-              },
-              {
-                label: 'LangGraph agent architecture',
-                content: (
-                  <div>
-                    <p className="mb-2">Used LangGraph because the workflow is a graph, not a linear chain: User → Agent → Understand Intent → Retrieve Information → Use Tools → Reason → Generate Response. Different nodes execute depending on the situation.</p>
-                    <BulletList items={[
-                      'Wired in Deepgram STT and Kokoro TTS so agents handle real voice input — closing the loop from raw audio signal to spoken response.',
-                      'Integrated tool use so the agent can call Knowledge Graph queries, product lookup tools, and external APIs mid-conversation.',
-                    ]} />
-                  </div>
-                ),
-              },
-              {
-                label: 'Human-in-the-loop feedback system',
-                content: (
-                  <div>
-                    <p className="mb-2">Built a feedback loop to catch agent errors that "sound correct" — the hardest class of LLM failures:</p>
-                    <BulletList items={[
-                      'Logged full conversation transcripts, retrieved vector chunks, products surfaced, and KG context for each interaction.',
-                      'A human reviewer provides natural-language feedback (e.g. "Should have recommended Product A, not B, because the customer is a small business").',
-                      'A feedback agent processes the feedback and updates the relevant knowledge — not just as a comment, but as re-embeddable corrections that improve future retrieval.',
-                      'Outcome: actual production failures become corrections to the system\'s knowledge base.',
-                    ]} />
-                  </div>
-                ),
-              },
-              {
-                label: 'Background processing',
-                content: (
-                  <BulletList items={[
-                    'Crawling and processing pipelines run as background jobs via Celery workers backed by Redis queues — preventing long-running tasks from blocking API requests.',
-                    'Redis also used for caching and supporting the async architecture.',
-                    'Deployed services via Docker on AWS Lightsail Container Service, API Gateway, and S3.',
-                  ]} />
                 ),
               },
             ]}

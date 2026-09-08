@@ -1,51 +1,64 @@
 import React, { useState } from 'react'
-import { FileText, ChevronDown, ChevronUp } from 'lucide-react'
+import { FileText, ChevronDown, ChevronUp, MessageSquare, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Document, Job, getChunks, Chunk } from '../api/client'
 
 interface DocEntry { doc: Document; job?: Job }
-interface Props { entries: DocEntry[] }
+interface Props { entries: DocEntry[]; onAskNow?: () => void }
 
-const STATUS_LABEL: Record<string, string> = {
+const STAGE_STEPS = ['processing', 'chunked', 'embedding', 'generating', 'linking', 'done']
+
+const STAGE_LABEL: Record<string, string> = {
   queued:     'Queued',
-  processing: 'Parsing',
+  processing: 'Parsing pages',
   chunked:    'Chunked',
-  embedding:  'Indexing',
-  generating: 'Building KG',
-  linking:    'Cross-linking',
-  done:       'Done',
+  embedding:  'Indexing vectors',
+  generating: 'Building knowledge graph',
+  linking:    'Cross-linking docs',
+  done:       'Ready',
   failed:     'Failed',
 }
 
-const STATUS_DOT: Record<string, string> = {
-  queued:     'bg-muted',
-  processing: 'bg-action-blue animate-pulse',
-  chunked:    'bg-action-blue animate-pulse',
-  embedding:  'bg-action-blue animate-pulse',
-  generating: 'bg-action-blue animate-pulse',
-  linking:    'bg-action-blue animate-pulse',
-  done:       'bg-deep-green',
-  failed:     'bg-error-red',
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const label = STATUS_LABEL[status] ?? status
-  const dot   = STATUS_DOT[status] ?? 'bg-muted'
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-xs border border-hairline px-2 py-0.5 text-xs text-slate">
-      <span className={clsx('h-1.5 w-1.5 rounded-full', dot)} />
-      {label}
-    </span>
-  )
+function StatusIcon({ status }: { status: string }) {
+  if (status === 'done')   return <CheckCircle2 className="h-4 w-4 text-deep-green" />
+  if (status === 'failed') return <AlertCircle className="h-4 w-4 text-error-red" />
+  return <Loader2 className="h-4 w-4 text-action-blue animate-spin" />
 }
 
 function ProgressBar({ value, active }: { value: number; active: boolean }) {
   return (
-    <div className="mt-2 h-px w-full bg-hairline overflow-hidden">
+    <div className="h-1 w-full overflow-hidden rounded-full bg-hairline">
       <div
-        className={clsx('h-full bg-ink transition-all duration-500', active && 'progress-active')}
+        className={clsx(
+          'h-full rounded-full bg-ink transition-all duration-700',
+          active && 'progress-active',
+        )}
         style={{ width: `${value}%` }}
       />
+    </div>
+  )
+}
+
+function StageTrack({ status, progress }: { status: string; progress?: number }) {
+  const idx = STAGE_STEPS.indexOf(status)
+  return (
+    <div className="mt-3 space-y-1.5">
+      <div className="flex items-center justify-between text-[10px] font-mono text-muted">
+        <span>{STAGE_LABEL[status] ?? status}</span>
+        {progress !== undefined && <span>{progress}%</span>}
+      </div>
+      <ProgressBar value={progress ?? (status === 'done' ? 100 : 0)} active={status !== 'done' && status !== 'failed'} />
+      <div className="flex gap-1 pt-0.5">
+        {STAGE_STEPS.slice(0, -1).map((s, i) => (
+          <div
+            key={s}
+            className={clsx(
+              'h-0.5 flex-1 rounded-full transition-colors duration-500',
+              i < idx ? 'bg-ink' : i === idx ? 'bg-action-blue' : 'bg-hairline',
+            )}
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -66,14 +79,14 @@ function ChunkStats({ docId }: { docId: string }) {
   }, {})
 
   return (
-    <div className="mt-3">
-      <button onClick={load} className="text-xs text-muted underline underline-offset-2 hover:text-ink">
+    <div className="mt-3 border-t border-hairline pt-3">
+      <button onClick={load} className="text-[11px] text-muted underline underline-offset-2 hover:text-ink transition-colors">
         {loading ? 'Loading…' : byLevel ? 'Chunk breakdown' : 'Show chunks'}
       </button>
       {byLevel && (
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap gap-1.5">
           {Object.entries(byLevel).map(([level, count]) => (
-            <span key={level} className="rounded-xs border border-hairline px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-muted">
+            <span key={level} className="rounded-xs border border-hairline bg-stone px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-slate">
               {level} · {count}
             </span>
           ))}
@@ -83,14 +96,17 @@ function ChunkStats({ docId }: { docId: string }) {
   )
 }
 
-export function DocumentList({ entries }: Props) {
+export function DocumentList({ entries, onAskNow }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null)
 
   if (!entries.length) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-hairline p-12 text-center">
+      <div className="flex flex-col items-center justify-center gap-3 rounded-sm border border-dashed border-hairline p-14 text-center">
         <FileText className="h-8 w-8 text-hairline" strokeWidth={1} />
-        <p className="text-sm text-muted">No documents — upload a PDF to begin</p>
+        <div>
+          <p className="text-sm font-medium text-ink">No documents yet</p>
+          <p className="mt-0.5 text-xs text-muted">Upload a PDF to start ingestion</p>
+        </div>
       </div>
     )
   }
@@ -99,72 +115,92 @@ export function DocumentList({ entries }: Props) {
     <ul className="space-y-2">
       {entries.map(({ doc, job }) => {
         const isExpanded = expanded === doc.id
-        const isActive   = job && !['done', 'failed'].includes(job.status ?? doc.status)
+        const status     = job?.status ?? doc.status
+        const isDone     = status === 'done'
+        const isFailed   = status === 'failed'
+        const isActive   = !isDone && !isFailed
 
         return (
-          <li key={doc.id} className="rounded-sm border border-hairline bg-canvas">
-            <button
-              className="flex w-full items-start gap-4 p-4 text-left"
-              onClick={() => setExpanded(isExpanded ? null : doc.id)}
-            >
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xs bg-stone">
-                <FileText className="h-4 w-4 text-slate" strokeWidth={1.5} />
+          <li key={doc.id} className={clsx(
+            'rounded-sm border bg-canvas transition-colors',
+            isDone   ? 'border-hairline' :
+            isFailed ? 'border-error-red/30' :
+                       'border-action-blue/20',
+          )}>
+            <div className="flex items-start gap-3 p-4">
+              {/* File icon */}
+              <div className={clsx(
+                'flex h-10 w-10 shrink-0 items-center justify-center rounded-xs',
+                isDone ? 'bg-pale-green' : isFailed ? 'bg-error-red/10' : 'bg-stone',
+              )}>
+                <FileText className={clsx(
+                  'h-4.5 w-4.5',
+                  isDone ? 'text-deep-green' : isFailed ? 'text-error-red' : 'text-slate',
+                )} strokeWidth={1.5} />
               </div>
 
+              {/* Main content */}
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="truncate text-sm font-medium text-ink">{doc.filename}</p>
-                  <StatusBadge status={doc.status} />
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink">{doc.filename}</p>
+                    <p className="mt-0.5 text-[11px] text-muted">
+                      {[
+                        doc.file_size && `${(doc.file_size / 1024 / 1024).toFixed(1)} MB`,
+                        doc.page_count && `${doc.page_count} pages`,
+                        new Date(doc.created_at).toLocaleDateString(),
+                      ].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    <StatusIcon status={status} />
+                    {isDone && onAskNow && (
+                      <button
+                        onClick={onAskNow}
+                        className="flex items-center gap-1 rounded-xs border border-hairline bg-stone px-2.5 py-1 text-[11px] font-medium text-slate hover:border-ink hover:text-ink transition-colors"
+                      >
+                        <MessageSquare className="h-3 w-3" />
+                        Ask
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setExpanded(isExpanded ? null : doc.id)}
+                      className="text-muted hover:text-ink transition-colors"
+                    >
+                      {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
 
-                <p className="mt-0.5 text-xs text-muted">
-                  {[
-                    doc.file_size && `${(doc.file_size / 1024 / 1024).toFixed(1)} MB`,
-                    doc.page_count && `${doc.page_count} pages`,
-                    new Date(doc.created_at).toLocaleString(),
-                  ].filter(Boolean).join(' · ')}
-                </p>
-
-                {job && (
-                  <div className="mt-2">
-                    <div className="flex items-center justify-between text-xs text-muted">
-                      <span>{job.message ?? job.stage}</span>
-                      <span className="font-mono">{job.progress}%</span>
-                    </div>
-                    <ProgressBar value={job.progress} active={!!isActive} />
-                  </div>
+                {/* Progress track */}
+                {isActive && job && (
+                  <StageTrack status={status} progress={job.progress} />
                 )}
 
                 {doc.error_msg && (
-                  <p className="mt-1.5 text-xs text-error-red">{doc.error_msg}</p>
+                  <p className="mt-2 text-xs text-error-red">{doc.error_msg}</p>
                 )}
               </div>
+            </div>
 
-              <div className="shrink-0 text-muted">
-                {isExpanded
-                  ? <ChevronUp className="h-4 w-4" />
-                  : <ChevronDown className="h-4 w-4" />}
-              </div>
-            </button>
-
+            {/* Expanded detail */}
             {isExpanded && (
-              <div className="border-t border-hairline px-4 pb-4 pt-3">
+              <div className="border-t border-hairline bg-stone/20 px-4 pb-4 pt-3">
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
                   {[
-                    ['Document ID', <span className="font-mono break-all">{doc.id}</span>],
-                    ['Stage',       job?.stage ?? '—'],
+                    ['Document ID', <span className="font-mono text-[10px] break-all">{doc.id}</span>],
+                    ['Stage',       STAGE_LABEL[status] ?? status],
                     ['Pages',       job?.total_pages ?? doc.page_count ?? '—'],
-                    ['Source',      'Text + OCR fallback'],
+                    ['Method',      'Text + OCR + Vision'],
                   ].map(([k, v]) => (
                     <div key={String(k)}>
                       <dt className="text-muted">{k}</dt>
-                      <dd className="mt-0.5 text-ink">{v}</dd>
+                      <dd className="mt-0.5 text-ink">{v as React.ReactNode}</dd>
                     </div>
                   ))}
                 </dl>
-                {(doc.status === 'chunked' || doc.status === 'done') && (
-                  <ChunkStats docId={doc.id} />
-                )}
+                {(status === 'chunked' || isDone) && <ChunkStats docId={doc.id} />}
               </div>
             )}
           </li>
