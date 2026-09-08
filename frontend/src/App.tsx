@@ -5,17 +5,11 @@ import { UploadZone } from './components/UploadZone'
 import { DocumentList } from './components/DocumentList'
 import { RelationshipsPage } from './pages/RelationshipsPage'
 import { QueryPage } from './pages/QueryPage'
+import { AboutProjectPage } from './pages/AboutProjectPage'
+import { AboutCreatorPage } from './pages/AboutCreatorPage'
 
 interface DocEntry { doc: Document; job?: Job }
-type Tab = 'documents' | 'relationships' | 'query'
-
-const PHASES = [
-  { n: 1, label: 'Document Intelligence', done: true },
-  { n: 2, label: 'Page Knowledge Graph',  done: true },
-  { n: 3, label: 'Vector Indexing',       done: true },
-  { n: 4, label: 'Cross-Doc Linking',     done: true },
-  { n: 5, label: 'Query Interface',       done: false, active: true },
-]
+type Tab = 'documents' | 'relationships' | 'query' | 'project' | 'creator'
 
 const ACTIVE_STATUSES = new Set(['queued', 'processing', 'chunked', 'embedding', 'generating', 'linking'])
 
@@ -80,6 +74,8 @@ export default function App() {
     { id: 'documents',     label: 'Documents' },
     { id: 'relationships', label: 'Relationships' },
     { id: 'query',         label: 'Query' },
+    { id: 'project',       label: 'About Project' },
+    { id: 'creator',       label: 'About Creator' },
   ]
 
   return (
@@ -103,29 +99,10 @@ export default function App() {
             </div>
           </div>
 
-          {/* Phase stepper */}
-          <ol className="hidden items-center gap-1 md:flex">
-            {PHASES.map(({ n, label, done, active }) => (
-              <React.Fragment key={n}>
-                <li className={clsx(
-                  'flex items-center gap-1.5 rounded-pill px-3 py-1 text-xs font-medium transition-colors',
-                  done   ? 'bg-ink text-canvas' :
-                  active ? 'bg-stone text-ink border border-hairline' :
-                           'text-muted',
-                )}>
-                  <span className={clsx(
-                    'flex h-3.5 w-3.5 items-center justify-center rounded-full text-[9px] font-semibold',
-                    done || active ? 'bg-white/20' : 'bg-hairline',
-                    !done && !active && 'text-muted bg-transparent',
-                  )}>
-                    {n}
-                  </span>
-                  {label}
-                </li>
-                {n < 5 && <span className="text-hairline text-xs">›</span>}
-              </React.Fragment>
-            ))}
-          </ol>
+          <div className="hidden items-center gap-1.5 md:flex">
+            <span className="rounded-xs border border-hairline bg-stone px-2.5 py-1 font-mono text-[10px] text-muted">VIT 2026</span>
+            <span className="rounded-xs border border-hairline bg-stone px-2.5 py-1 font-mono text-[10px] text-muted">Superjoin Assignment</span>
+          </div>
         </div>
       </header>
 
@@ -199,8 +176,12 @@ export default function App() {
           </div>
         ) : tab === 'relationships' ? (
           <RelationshipsPage documents={docs} />
-        ) : (
+        ) : tab === 'query' ? (
           <QueryPage documents={docs} />
+        ) : tab === 'project' ? (
+          <AboutProjectPage />
+        ) : (
+          <AboutCreatorPage />
         )}
       </main>
     </div>
