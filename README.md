@@ -28,8 +28,6 @@ This system builds a **Fact Knowledge Layer** on top of any PDF corpus. For each
 
 ## Architecture
 
-> *(Architecture diagram — see below)*
-
 ![Architecture Diagram](./docs/architecture.png)
 
 ### Ingestion Pipeline
