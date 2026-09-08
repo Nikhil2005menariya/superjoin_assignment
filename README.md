@@ -307,7 +307,7 @@ Ingestion time is dominated by page KG generation (1 Nova 2 Lite call per page).
 
 ## Video Demo
 
-> *(Link to be added — 3 min or less)*
+**[Watch Demo Video](https://drive.google.com/file/d/122Gr1s8pm3AvuccfI_65wVa1ziI6vxL0/view?usp=sharing)** (3 min or less)
 
 The demo covers: uploading a PDF and watching the ingestion pipeline, querying with grounded answers and source passages, the Relationships tab with live cross-document links, and all four required cases.
 
