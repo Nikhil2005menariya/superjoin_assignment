@@ -1,9 +1,8 @@
 import React, { useState } from 'react'
 import clsx from 'clsx'
 import {
-  Brain, Layers, Zap, GitMerge, Shield, TrendingUp,
-  AlertTriangle, ChevronDown, ChevronUp, Eye, Database,
-  Search, FileText, Link2, BarChart2,
+  Brain, Layers, Shield,
+  Eye, Database, Search, FileText, Link2, BarChart2,
 } from 'lucide-react'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -93,23 +92,6 @@ function StackChip({ name, role }: { name: string; role: string }) {
   )
 }
 
-// ─── Improvement item ─────────────────────────────────────────────────────────
-
-function ImprovementItem({ title, desc, effort }: { title: string; desc: string; effort: 'Quick win' | 'Medium' | 'Large' }) {
-  const effortColor = effort === 'Quick win' ? 'green' : effort === 'Medium' ? 'amber' : 'default'
-  return (
-    <div className="flex items-start gap-3 py-3 border-b border-hairline last:border-0">
-      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted" />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-          <span className="text-sm font-medium text-ink">{title}</span>
-          <Tag color={effortColor}>{effort}</Tag>
-        </div>
-        <p className="text-xs text-body-muted leading-relaxed">{desc}</p>
-      </div>
-    </div>
-  )
-}
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
@@ -120,11 +102,6 @@ export function AboutProjectPage() {
       {/* ── Hero ── */}
       <div className="rounded-sm border border-hairline bg-canvas overflow-hidden">
         <div className="px-8 py-10 border-b border-hairline">
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <Tag color="green">VIT 2026 Assignment</Tag>
-            <Tag color="blue">Superjoin</Tag>
-            <Tag>AI Internship</Tag>
-          </div>
           <h1 className="text-3xl font-semibold tracking-tight text-ink mb-3">
             Fact Knowledge Layer
           </h1>
@@ -338,38 +315,37 @@ export function AboutProjectPage() {
         </div>
       </div>
 
-      {/* ── Areas of improvement ── */}
+      {/* ── Limitations ── */}
       <div>
-        <SectionHeading>Areas of improvement</SectionHeading>
-        <div className="rounded-sm border border-hairline bg-canvas divide-y divide-hairline overflow-hidden">
-          <ImprovementItem
-            effort="Quick win" title="Retry logic on synthesis failures"
-            desc="Add 3× exponential backoff retry inside answer_query when Nova 2 Lite returns a ThrottlingException. Currently the system returns LOW immediately, which misclassifies ~27% of results in concurrent load scenarios."
-          />
-          <ImprovementItem
-            effort="Quick win" title="Remove doc_id filter for cross-doc questions"
-            desc="Cross-document comparison queries (e.g. 'compare FY22 vs FY24 fleet size') should be issued without a doc_id filter so retrieval spans all indexed collections. Currently the UI always passes the selected doc filter."
-          />
-          <ImprovementItem
-            effort="Medium" title="Bedrock request queue / rate limiter"
-            desc="Concurrent LLM calls under parallel batch evaluation hit ThrottlingException after ~3 simultaneous requests. A token-bucket request queue with async worker pool would eliminate all throttle errors at scale."
-          />
-          <ImprovementItem
-            effort="Medium" title="Streaming answer output"
-            desc="The frontend currently waits for the full answer before rendering. Nova 2 Lite supports streaming — connecting the SSE event stream to react-markdown's incremental parser would give a ChatGPT-style typewriter effect."
-          />
-          <ImprovementItem
-            effort="Medium" title="Larger embedding model for financial terminology"
-            desc="bge-small (384-dim, ~130MB) was chosen for RAM constraints. bge-large-en-v1.5 (1024-dim, ~1.3GB) would significantly improve recall on dense financial jargon and regulatory codes. Practical on ≥4GB instances."
-          />
-          <ImprovementItem
-            effort="Large" title="Multi-hop query decomposition"
-            desc="Complex questions requiring computation across multiple pages (e.g. 'implied CAGR from FY19 to annualised 9M FY22') currently fail because the LLM receives context from both pages but struggles with the multi-step arithmetic. A query decomposition agent could break these into sub-questions."
-          />
-          <ImprovementItem
-            effort="Large" title="Table-native extraction (structured parsing)"
-            desc="Financial tables with merged cells, footnotes, and multi-row headers are partially lost in text extraction. Integrating a table-detection model (e.g. TATR) before chunking would capture tabular structure that PyMuPDF's text flatten misses."
-          />
+        <SectionHeading>Limitations</SectionHeading>
+        <div className="space-y-3">
+          {[
+            {
+              n: '01',
+              title: 'LLM-intensive ingestion',
+              body: 'Every page goes through at least one Nova 2 Lite call to build its knowledge file, plus a second multimodal call if the page has images. For a 100-page document that\'s 100–180 LLM calls during ingestion — significantly more than a standard RAG pipeline that skips this step entirely. This makes ingestion slower and more expensive at scale compared to pure chunking approaches.',
+            },
+            {
+              n: '02',
+              title: 'Weak on multi-hop arithmetic',
+              body: 'Questions that require chaining values across multiple pages — e.g. computing an implied CAGR from figures on page 5 and page 42 — often fail. The retrieval step surfaces both pages correctly, but the LLM struggles to perform multi-step arithmetic reliably over long context. A standard RAG system with a calculator tool would actually handle these better.',
+            },
+            {
+              n: '03',
+              title: 'Table structure partially lost in extraction',
+              body: 'PyMuPDF flattens PDF tables into plain text, which loses merged cells, multi-row headers, and footnote associations. The vision pass recovers some of this from charts and infographics, but dense text-based financial tables (e.g. multi-column P&L statements) are still partially mis-structured after extraction.',
+            },
+          ].map(item => (
+            <div key={item.n} className="flex gap-5 rounded-sm border border-hairline bg-canvas px-5 py-4">
+              <span className="mt-0.5 font-mono text-2xl font-semibold text-hairline shrink-0 select-none leading-tight">
+                {item.n}
+              </span>
+              <div>
+                <p className="mb-1.5 text-sm font-semibold text-ink">{item.title}</p>
+                <p className="text-sm text-body-muted leading-relaxed">{item.body}</p>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
