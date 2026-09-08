@@ -208,9 +208,9 @@ export function AboutCreatorPage() {
               category: 'Backend & Data',
               icon: Zap,
               chips: [
-                'FastAPI', 'Node.js', 'REST APIs', 'Data Pipelines',
+                'FastAPI', 'Node.js', 'Express', 'REST APIs', 'Data Pipelines',
                 'Data Extraction & Cleansing', 'Unstructured Data Processing',
-                'Celery', 'Redis', 'MySQL', 'PostgreSQL', 'MongoDB',
+                'Celery', 'Redis', 'BullMQ', 'Supabase', 'PostgreSQL', 'MySQL', 'MongoDB',
               ],
             },
             {
@@ -226,7 +226,7 @@ export function AboutCreatorPage() {
             {
               category: 'Cloud & Infrastructure',
               icon: GitBranch,
-              chips: ['AWS', 'Docker', 'CI/CD', 'Git', 'Lightsail', 'S3', 'Amplify', 'API Gateway'],
+              chips: ['AWS Lightsail', 'Docker', 'CI/CD', 'Git', 'PM2', 'Vercel', 'S3', 'Amplify', 'API Gateway'],
             },
           ].map(group => (
             <div key={group.category} className="rounded-sm border border-hairline bg-canvas p-4">
@@ -251,43 +251,74 @@ export function AboutCreatorPage() {
 
           <ExpandableCard
             badge="Internship"
-            title="TheTaxpert (TEKSTRATA Pvt. Ltd.)"
+            title="texPert (TEKSTRATA Pvt. Ltd.)"
             subtitle="Full Stack Developer Intern"
             period="May 2026 – Present"
             location="Remote, Hyderabad"
-            summary="Owned end-to-end development of thetaxpert.com — a live tax and financial document processing platform that parses GST, TDS, and ROC filings. Now serving 200–500 daily users."
-            tags={['React', 'Node.js', 'FastAPI', 'MySQL', 'Razorpay', 'AWS S3', 'Lightsail', 'Amplify']}
+            summary="Built texPert — a B2C tax-filing and CA services platform for Indian retail clients. Designed the entire system solo: RBAC model (6 roles), multi-stage document workflow, webhook-driven payments, config-driven service engine, coupon & referral system, and audit log. Live in production."
+            tags={['Node.js', 'TypeScript', 'Express', 'React', 'Supabase', 'PostgreSQL', 'Redis', 'BullMQ', 'Razorpay', 'AWS Lightsail', 'Vercel', 'PM2']}
             sections={[
               {
-                label: 'What is TheTaxpert?',
+                label: 'What is texPert?',
                 content: (
-                  <p>A live tax and financial-document processing platform where clients submit dense semi-structured documents (GST, TDS, ROC filings) that are parsed, validated, and processed. The platform handled 300+ clients during the ITR season and runs with 200–500 daily users.</p>
+                  <p>
+                    A B2C managed service marketplace for Indian retail tax clients. A client pays online for a service (ITR filing, GST registration, etc.), gets assigned to a Chartered Accountant (called a "Taxpert"), uploads their documents, and tracks the entire filing through a multi-stage workflow — all within a single web app. The platform is live in production serving real paying clients.
+                  </p>
                 ),
               },
               {
-                label: 'What I built',
+                label: 'What I designed & built',
                 content: (
                   <BulletList items={[
-                    'Owned the entire pipeline solo — backend APIs, frontend, database, payments, cloud deployment.',
-                    'Built data validation and reconciliation logic: instead of blindly trusting extracted values, related fields are cross-checked against each other before reaching production.',
-                    'Designed a microservices architecture: Node.js for application APIs, FastAPI for Python-based document processing services.',
-                    'Integrated Razorpay for payments. Fixed a production issue where a successful Razorpay event did not update the application payment state — separated Payment State from Filing State to prevent duplicate or missed payment processing.',
-                    'Implemented an admin-controlled fallback payment system (UPI scanner → team verification → admin panel) so the business could accept payments even when the automated payment gateway was unavailable.',
-                    'Set up CI/CD so changes go live quickly with iteration on real user feedback.',
+                    'Designed the entire system from scratch — solo, end-to-end: backend, frontend, database schema, payment flow, and deployment.',
+                    'RBAC model with 6 roles: client, CA (Taxpert), admin, and support tiers — each with scoped access to documents, workflows, and billing.',
+                    'Multi-stage document workflow: client uploads → CA reviews → status transitions (pending / in-review / filed / completed) with per-stage audit trail.',
+                    'Config-driven service engine: services (ITR, GST, TDS, etc.) are defined in config, not hardcoded — new service types can be added without code changes.',
+                    'Coupon & referral system: discount codes with expiry, per-user referral links, referral commission tracking.',
+                    'Full audit log: every state change, document action, and payment event is recorded with actor, timestamp, and previous state.',
+                    'Email, reminder, and SLA monitoring jobs via Redis + BullMQ background queue — decoupled from the request path.',
                   ]} />
                 ),
               },
               {
                 label: 'Architecture',
                 content: (
-                  <div className="font-mono text-[11px] bg-stone rounded-xs p-3 text-slate leading-relaxed">
-                    {'React Frontend → Node.js APIs → PostgreSQL\n                          ↓\n                       FastAPI\n                          ↓\n              Document Processing (GST/TDS/ROC)\n                       ↑    ↓\n                    S3 (file storage)'}
+                  <div className="font-mono text-[11px] bg-stone rounded-xs p-3 text-slate leading-relaxed whitespace-pre">
+{`React + TypeScript  (Vercel)
+        │
+        ▼
+Node.js + TypeScript REST API  (AWS Lightsail + PM2)
+        │
+        ├──▶ Supabase (PostgreSQL + Auth)
+        │
+        ├──▶ Redis + BullMQ
+        │         └── email / reminders / SLA jobs
+        │
+        └──▶ Razorpay  (webhook-driven)`}
+                  </div>
+                ),
+              },
+              {
+                label: 'Hardest engineering problem — idempotent Razorpay webhooks',
+                content: (
+                  <div>
+                    <p className="mb-2">
+                      Razorpay retries webhook delivery if it doesn't receive a 200 response quickly enough. That means a single <code className="rounded-xs bg-stone px-1.5 py-0.5 font-mono text-[11px]">payment.captured</code> event can arrive multiple times.
+                    </p>
+                    <BulletList items={[
+                      'Naïve handler: each webhook hit creates a new order record → duplicate payments, duplicate CA assignments, corrupted workflow state.',
+                      'Fix: idempotency key stored on first processing. Every subsequent webhook with the same payment ID hits the key check and returns 200 immediately without executing any side effects.',
+                      'Also separated Payment State from Workflow/Filing State — a payment being captured and a filing being completed are two distinct state machines that progress independently.',
+                      'Result: zero duplicate records in production despite Razorpay retry storms.',
+                    ]} />
                   </div>
                 ),
               },
               {
                 label: 'Key outcome',
-                content: <p>Platform is live and used by real users daily. This was my first experience owning a production system end-to-end — including deployment, failure handling, database consistency, and maintaining a running application under real load.</p>,
+                content: (
+                  <p>Platform is live with real paying clients. Owning this end-to-end taught me that building a feature is a small fraction of the work — the rest is RBAC design, payment reliability, background job failure handling, audit trails, and keeping the system consistent under concurrent real-world usage.</p>
+                ),
               },
             ]}
           />
